@@ -6,3 +6,5 @@ target/
 .idea/
 .vscode/
 GATES.md
+
+graphify-out/

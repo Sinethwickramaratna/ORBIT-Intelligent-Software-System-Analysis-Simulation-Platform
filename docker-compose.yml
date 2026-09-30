@@ -13,7 +13,7 @@ name: orbit
 
 services:
   # Runs first and exits. Docker turns a MISSING bind-mounted file into a FOLDER, so this makes sure ./.env is a real
-  # file (copied from .env.example) before postgres/backend mount it. It also repairs an empty .env folder.
+  # file (copied from .env.example) before postgres/backend mount it. It also repairs an empty .env folder and makes the file writable (the backend runs as a non-root user and saves your settings into it).
   init-env:
     image: postgres:16-alpine
     container_name: orbit-init-env
@@ -23,6 +23,7 @@ services:
       - |
         if [ -d /project/.env ]; then rmdir /project/.env || { echo "ERROR: .env is a non-empty folder - delete it"; exit 1; }; fi
         if [ ! -f /project/.env ]; then cp /project/.env.example /project/.env && echo "Created .env from .env.example"; fi
+        chmod 666 /project/.env 2>/dev/null || true
     volumes:
       - ./:/project
 

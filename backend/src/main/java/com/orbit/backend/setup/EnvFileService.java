@@ -1,5 +1,7 @@
 package com.orbit.backend.setup;
 
+import com.orbit.backend.common.exception.ApiException;
+import com.orbit.backend.common.exception.ErrorCode;
 import com.orbit.backend.config.OrbitProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -28,8 +31,28 @@ public class EnvFileService {
 
     public synchronized void update(Map<String, String> values) {
         Path file = Path.of(properties.envFile()).toAbsolutePath().normalize();
-        write(file, values);
+        try {
+            write(file, values);
+        } catch (UncheckedIOException e) {
+            IOException cause = e.getCause();
+            log.error("Could not write {} (exists={}, directory={}, writable={})",
+                    file, Files.exists(file), Files.isDirectory(file), Files.isWritable(file), e);
+            throw new ApiException(ErrorCode.ENV_FILE_NOT_WRITABLE, describe(file, cause));
+        }
         log.info("Saved {} to {}", values.keySet(), file);
+    }
+
+    /** A message the setup screen can show: says what is wrong and how to fix it. */
+    private static String describe(Path file, IOException cause) {
+        if (Files.isDirectory(file)) {
+            return file + " is a folder, not a file. Stop the stack, delete the .env folder and start again "
+                    + "(docker compose up creates the file automatically).";
+        }
+        if (cause instanceof AccessDeniedException || !Files.isWritable(file)) {
+            return "The backend has no permission to write " + file + ". Make the project's .env file writable "
+                    + "(Linux/macOS: chmod 666 .env) and try again.";
+        }
+        return "Could not write " + file + ": " + (cause == null ? "unknown error" : cause.getMessage());
     }
 
     /** Replaces {@code KEY=...} lines (or appends them) and keeps every other line untouched. */

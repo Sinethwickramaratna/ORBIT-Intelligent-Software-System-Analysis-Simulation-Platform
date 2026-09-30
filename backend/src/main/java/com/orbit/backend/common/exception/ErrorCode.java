@@ -21,6 +21,7 @@ public enum ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "Resource not found"),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "HTTP method not allowed for this endpoint"),
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported content type"),
+    ENV_FILE_NOT_WRITABLE(HttpStatus.INTERNAL_SERVER_ERROR, "The .env file could not be written"),
     VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "Request validation failed"),
     INVALID_SETTING(HttpStatus.BAD_REQUEST, "Invalid setting value"),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "You are not allowed to do that"),
