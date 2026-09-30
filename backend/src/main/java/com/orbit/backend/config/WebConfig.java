@@ -1,6 +1,6 @@
 package com.orbit.backend.config;
 
-import com.orbit.backend.database.DatabaseReadyInterceptor;
+import com.orbit.backend.filter.DatabaseReadyInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;

@@ -1,7 +1,7 @@
 package com.orbit.backend.config;
 
-import com.orbit.backend.auth.JwtAuthenticationEntryPoint;
-import com.orbit.backend.auth.JwtAuthenticationFilter;
+import com.orbit.backend.filter.JwtAuthenticationEntryPoint;
+import com.orbit.backend.filter.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

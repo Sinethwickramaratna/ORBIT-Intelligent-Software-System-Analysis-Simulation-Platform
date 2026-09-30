@@ -1,11 +1,11 @@
 package com.orbit.backend;
 
-import com.orbit.backend.auth.RefreshToken;
-import com.orbit.backend.auth.RefreshTokenRepository;
-import com.orbit.backend.database.DatabaseProvisioner;
-import com.orbit.backend.database.DatabaseState;
-import com.orbit.backend.user.User;
-import com.orbit.backend.user.UserRepository;
+import com.orbit.backend.entity.RefreshToken;
+import com.orbit.backend.repository.RefreshTokenRepository;
+import com.orbit.backend.service.DatabaseProvisioner;
+import com.orbit.backend.config.DatabaseState;
+import com.orbit.backend.entity.User;
+import com.orbit.backend.repository.UserRepository;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.BeforeAll;
