@@ -1,0 +1,16 @@
+spring:
+  jpa:
+    database: h2
+    properties:
+      hibernate.dialect: org.hibernate.dialect.H2Dialect
+orbit:
+  # Tests only ever WRITE this file; the secret always starts unconfigured, even if a developer's real .env or
+  # environment has JWT_SECRET.
+  env-file: ./target/test-env/.env
+  jwt:
+    secret: ""
+  database:
+    # In-memory H2 instead of PostgreSQL: with an explicit URL the credentials count as configured.
+    url: jdbc:h2:mem:orbit;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""

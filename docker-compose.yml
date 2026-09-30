@@ -1,0 +1,92 @@
+# ORBIT local stack: PostgreSQL + backend (Spring Boot) + frontend (Next.js).
+#
+#   (.env is created automatically by the init-env service; start.cmd / start.sh are optional helpers)
+#   cp .env.example .env            # optional - a sample with EMPTY secrets (the setup screen fills them in)
+#   docker compose up -d --build    # everything      ->  http://localhost:3000
+#   docker compose up -d postgres   # database only (run backend/frontend from your IDE)
+#   docker compose down             # stop, data is KEPT
+#   docker compose down -v          # ONLY command that deletes the database
+#
+# First run: open http://localhost:3000, enter JWT secret + DB username/password. They are saved to .env; the
+# PostgreSQL container is waiting for them and then creates the database with exactly those credentials.
+name: orbit
+
+services:
+  # Runs first and exits. Docker turns a MISSING bind-mounted file into a FOLDER, so this makes sure ./.env is a real
+  # file (copied from .env.example) before postgres/backend mount it. It also repairs an empty .env folder.
+  init-env:
+    image: postgres:16-alpine
+    container_name: orbit-init-env
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if [ -d /project/.env ]; then rmdir /project/.env || { echo "ERROR: .env is a non-empty folder - delete it"; exit 1; }; fi
+        if [ ! -f /project/.env ]; then cp /project/.env.example /project/.env && echo "Created .env from .env.example"; fi
+    volumes:
+      - ./:/project
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: orbit-postgres
+    restart: unless-stopped
+    depends_on:
+      init-env:
+        condition: service_completed_successfully
+    # Idles until DB_USERNAME / DB_PASSWORD exist in .env, then starts PostgreSQL with them
+    entrypoint: ["sh", "/orbit/wait-for-credentials.sh"]
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      # Named volume: lives on each developer's own machine, survives container
+      # re-creation / image upgrades / `docker compose down`.
+      - orbit_pgdata:/var/lib/postgresql/data
+      - ./.env:/orbit/.env:ro
+      - ./infrastructure/postgresql/wait-for-credentials.sh:/orbit/wait-for-credentials.sh:ro
+    healthcheck:
+      # healthy only once PostgreSQL is really running (i.e. after the credentials were entered)
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  backend:
+    build:
+      context: ./backend
+    container_name: orbit-backend
+    restart: unless-stopped
+    depends_on:
+      init-env:
+        condition: service_completed_successfully
+      # The backend must start BEFORE the database exists (it hosts the setup screen's API), so it only waits
+      # for the container to be started, not healthy.
+      postgres:
+        condition: service_started
+    environment:
+      # Inside the compose network PostgreSQL is "postgres:5432" (overrides DB_PORT from .env)
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # The setup screen writes JWT_SECRET / DB_USERNAME / DB_PASSWORD into this file (DB_NAME defaults to orbit).
+      # Created by the init-env service if it does not exist yet
+      - ./.env:/app/.env
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Address the BROWSER uses to reach the backend
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    container_name: orbit-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  orbit_pgdata:
+    name: orbit_pgdata

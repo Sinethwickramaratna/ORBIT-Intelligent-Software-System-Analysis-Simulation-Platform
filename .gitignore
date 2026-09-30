@@ -1,0 +1,8 @@
+.env
+node_modules/
+.next/
+target/
+*.log
+.idea/
+.vscode/
+GATES.md

@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: backend
+  config:
+    # Local per-machine settings (JWT_SECRET, DB_USERNAME, DB_PASSWORD, ...) live in the repo-root .env
+    import: "optional:file:${ORBIT_ENV_FILE:../.env}[.properties]"
+  # No spring.datasource.*: the connection pool is created by DatabaseProvisioner after the user has entered the
+  # database credentials in the first-run setup screen.
+  sql:
+    init:
+      mode: never
+  jpa:
+    open-in-view: false
+    database: postgresql
+    hibernate:
+      ddl-auto: none            # Flyway owns the schema
+    properties:
+      # Hibernate must not touch the database while the application boots (it may not exist yet).
+      hibernate.boot.allow_jdbc_metadata_access: false
+      hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
+
+server:
+  port: 8080
+
+orbit:
+  env-file: ${ORBIT_ENV_FILE:../.env}
+  cors:
+    allowed-origins: http://localhost:3000,http://127.0.0.1:3000
+  database:
+    host: ${DB_HOST:localhost}
+    port: ${DB_PORT:5433}
+    name: ${DB_NAME:orbit}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
+    url: ${DB_URL:}
+  jwt:
+    # Created by the user in the first-run setup screen and stored as JWT_SECRET in .env
+    secret: ${JWT_SECRET:}
+    access-token-minutes: 15
+    refresh-token-hours: 24
+
+logging:
+  level:
+    root: INFO
+    com.orbit: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
