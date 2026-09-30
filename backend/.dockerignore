@@ -1,7 +1,13 @@
 target/
 .idea/
-.mvn/wrapper/maven-wrapper.jar
+.git
+.gitignore
+.mvn/
+mvnw
+mvnw.cmd
+*.iml
 *.log
 .env
-Dockerfile
 HELP.md
+Dockerfile
+.dockerignore

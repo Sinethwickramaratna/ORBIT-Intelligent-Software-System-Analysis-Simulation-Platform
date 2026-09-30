@@ -5,7 +5,8 @@
 #   docker compose up -d --build    # everything      ->  http://localhost:3000
 #   docker compose up -d postgres   # database only (run backend/frontend from your IDE)
 #   docker compose down             # stop, data is KEPT
-#   docker compose down -v          # ONLY command that deletes the database
+#   docker compose down -v          # removes the volume - but ./backups restores the data on the next start
+#                                   # (to really start from zero also delete the ./backups folder)
 #
 # First run: open http://localhost:3000, enter JWT secret + DB username/password. They are saved to .env; the
 # PostgreSQL container is waiting for them and then creates the database with exactly those credentials.
@@ -15,7 +16,7 @@ services:
   # Runs first and exits. Docker turns a MISSING bind-mounted file into a FOLDER, so this makes sure ./.env is a real
   # file (copied from .env.example) before postgres/backend mount it. It also repairs an empty .env folder and makes the file writable (the backend runs as a non-root user and saves your settings into it).
   init-env:
-    image: postgres:16-alpine
+    image: alpine:3.21
     container_name: orbit-init-env
     restart: "no"
     entrypoint: ["sh", "-c"]
@@ -28,7 +29,10 @@ services:
       - ./:/project
 
   postgres:
-    image: postgres:16-alpine
+    # Slim single-layer build of postgres:16-alpine (JIT/LLVM removed) - see infrastructure/postgresql/Dockerfile
+    build:
+      context: ./infrastructure/postgresql
+    image: orbit-postgres:16-slim
     container_name: orbit-postgres
     restart: unless-stopped
     depends_on:
@@ -44,6 +48,9 @@ services:
       - orbit_pgdata:/var/lib/postgresql/data
       - ./.env:/orbit/.env:ro
       - ./infrastructure/postgresql/wait-for-credentials.sh:/orbit/wait-for-credentials.sh:ro
+      # Automatic SQL backup (written every few seconds) and restore-on-empty-volume: the data survives even `down -v`
+      - ./backups:/backups
+      - ./infrastructure/postgresql/restore-backup.sh:/docker-entrypoint-initdb.d/10-restore-backup.sh:ro
     healthcheck:
       # healthy only once PostgreSQL is really running (i.e. after the credentials were entered)
       test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]

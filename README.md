@@ -63,10 +63,10 @@ The backend starts *without* a database (only `/api/setup/**` works; every other
 ## Database persistence
 
 Data lives in the Docker named volume `orbit_pgdata` on *your* machine (never in git).
-`docker compose down`, restarts, re-creation and image upgrades keep it. Only `docker compose down -v` wipes it.
+`docker compose down`, restarts, rebuilds (`up --build`) and image upgrades keep it. As a safety net an SQL backup is written to the git-ignored `./backups` folder every few seconds; if the volume is ever removed (`down -v`, "delete volumes" in Docker Desktop, `docker volume prune`) the next start restores the users and settings from it. To start from zero on purpose, run `docker compose down -v` **and** delete the `backups` folder.
 
 > PostgreSQL applies `DB_USERNAME`/`DB_PASSWORD` only when it initialises an **empty** data volume. Changing them in
-> `.env` later does not change an existing database — run `docker compose down -v` to start over with new credentials.
+> `.env` later does not change an existing database — run `docker compose down -v`, delete the `backups` folder and `copy .env.example .env` to start over with new credentials.
 
 ## Tables
 
@@ -103,3 +103,41 @@ Errors are JSON: `{timestamp,status,code,message,path,fieldErrors?}` — e.g. `U
 ## Security notes
 
 `/api/setup/**` is unauthenticated by design (there are no users yet) and can only *set* values that are still empty. Keep the ports bound to localhost (as in `docker-compose.yml`) and never commit `.env`.
+
+## Smaller Docker images
+
+What changed (structure — this is what shrinks the size `docker images` shows):
+
+| Image | Before | Now |
+|---|---|---|
+| frontend | Node 22 runtime + standalone server | Next.js **static export** served by `nginx-unprivileged:alpine-slim` (no Node, no node_modules) |
+| backend | `eclipse-temurin:17-jre-alpine` | multi-stage: Maven build → **jdeps + jlink** custom JRE (`backend/docker/make-jre.sh`) → bare `alpine` |
+| postgres | `postgres:16-alpine` | same server, **JIT/LLVM removed** and the filesystem **flattened to one layer** (`infrastructure/postgresql/Dockerfile`) |
+
+All three also use `.dockerignore`, cache mounts and no package-manager caches in the final layers.
+Measure the result yourself: `docker images` (SIZE column) and `docker history orbit-backend`.
+
+Layer compression (BuildKit `--output`):
+
+```bash
+scripts/build-images.sh zstd                    # or gzip | estargz | uncompressed -> ./dist/orbit-*.tar
+scripts/build-images.sh zstd --push myrepo      # push myrepo/orbit-<name>:latest
+scripts\build-images.cmd zstd                   # Windows
+```
+
+which runs `docker buildx build --output type=oci,dest=...,compression=zstd,force-compression=true,oci-mediatypes=true`.
+**Important:** compression only shrinks what is *stored or transferred* (registry, `docker save`, pull time). The size that
+`docker images` prints is the *uncompressed* size and is identical for gzip, zstd and estargz — `uncompressed` only matters for
+local use. zstd needs a runtime that understands it (recent Docker/containerd); `estargz` additionally needs the stargz snapshotter
+for lazy pulling; use `gzip` when in doubt.
+
+Optional tools (run on your machine, not part of the build):
+
+```bash
+dive orbit-backend                          # browse layers, find wasted space
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock dslim/slim build --target orbit-frontend   # SlimToolkit
+docker-squash -t orbit-backend:squashed orbit-backend   # flattens layers (the postgres Dockerfile already does this with `FROM scratch`)
+```
+
+SlimToolkit observes one run of the container and deletes everything it did not touch. It can break the backend (Spring loads classes
+lazily) — use `--http-probe` against `/api/setup/status` and re-test the login flow before adopting a slimmed image.
