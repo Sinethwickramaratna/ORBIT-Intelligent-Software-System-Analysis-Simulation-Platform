@@ -199,7 +199,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
                     className={`project-card${p.projectId === activeId ? " active" : ""}`}
                     tabIndex={tab}
                     onClick={() => setActiveId(p.projectId)}
-                    title={p.location}
+                    title={`${p.location}\nCreated ${new Date(p.createdAt).toLocaleString()}`}
                     aria-current={p.projectId === activeId ? "true" : undefined}
                   >
                     <span className="project-icon">
@@ -235,7 +235,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
           <div className="project-view">
             <main className="project-middle" aria-label={`${active.projectName} workspace`}>
               <div className="project-tab">
-                <span className="project-tab-name" title={active.location}>{active.projectName}</span>
+                <span className="project-tab-name" title={`${active.location}\nCreated ${new Date(active.createdAt).toLocaleString()}`}>{active.projectName}</span>
                 <button type="button" className="icon-btn small" aria-label="Close project" title="Close project" onClick={() => setActiveId(null)}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
                 </button>

@@ -4,7 +4,10 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -41,14 +44,20 @@ public class Project {
     @Column(name = "description", length = 2000)
     private String description;
 
-    @Column(name = "user_id", nullable = false, updatable = false)
-    private UUID userId;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false, updatable = false)
+    private User user;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /** The owner's id, read from the foreign key without loading the {@link User}. */
+    public UUID getUserId() {
+        return user.getUserId();
+    }
 
     @PrePersist
     void onCreate() {

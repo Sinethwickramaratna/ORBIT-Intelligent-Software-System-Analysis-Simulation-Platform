@@ -52,6 +52,11 @@ public class ProjectPathResolver {
         return hostRoot != null ? hostRoot : containerRoot;
     }
 
+    /** The mounted root as this backend sees it (null when anywhere is allowed). */
+    public Path containerRootPath() {
+        return containerRoot == null ? null : Path.of(containerRoot).normalize();
+    }
+
     public Resolved resolve(String raw) {
         if (raw == null || raw.isBlank()) {
             throw new ApiException(ErrorCode.PROJECT_LOCATION_INVALID, "Location is required");

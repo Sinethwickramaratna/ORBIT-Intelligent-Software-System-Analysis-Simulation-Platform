@@ -85,6 +85,19 @@ export interface LocationInspection {
   gitRepository: boolean;
 }
 
+export interface BrowseFolder {
+  name: string;
+  path: string;
+}
+
+export interface FolderBrowse {
+  path: string;
+  parent: string | null;
+  folders: BrowseFolder[];
+  shortcuts: BrowseFolder[];
+  truncated: boolean;
+}
+
 interface TokenResponse {
   tokenType: string;
   accessToken: string;
@@ -217,6 +230,10 @@ export const api = {
   projectConfig: () => authed<{ root: string | null }>("/api/projects/config"),
   inspectLocation: (location: string) =>
     authed<LocationInspection>(`/api/projects/inspect?location=${encodeURIComponent(location)}`),
+  browseFolders: (path?: string) =>
+    authed<FolderBrowse>(`/api/projects/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  createFolder: (parent: string, name: string) =>
+    authed<FolderBrowse>("/api/projects/browse/folder", { method: "POST", body: JSON.stringify({ parent, name }) }),
   projectTree: (projectId: string, path = "") =>
     authed<ProjectTree>(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`),
 

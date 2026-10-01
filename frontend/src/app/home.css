@@ -235,3 +235,71 @@
   .project-view { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .explorer { border-left: 0; border-top: 1px solid var(--border); max-height: 50vh; }
 }
+
+/* ---------- JetBrains-style windows (New Project, Select Location) ---------- */
+.modal.jb-modal, .modal.picker { padding: 0; overflow: hidden; display: flex; flex-direction: column; border-radius: 8px; }
+.modal.jb-modal { width: min(620px, 100%); }
+.modal.picker { width: min(560px, 100%); height: min(560px, calc(100vh - 32px)); }
+.picker-backdrop { z-index: 60; background: rgba(0, 0, 0, .35); }
+
+.jb-titlebar { flex: none; height: 42px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 18px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.jb-title { font-size: 14px; font-weight: 600; letter-spacing: .01em; }
+.jb-close { width: 28px; height: 28px; display: grid; place-items: center; font-size: 20px; line-height: 1; color: var(--muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.jb-close:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+
+.jb-body { padding: 20px 22px 8px; overflow-y: auto; scrollbar-width: none; }
+.jb-body::-webkit-scrollbar { display: none; }
+.jb-row { display: grid; grid-template-columns: 96px 1fr; column-gap: 14px; align-items: start; margin-bottom: 14px; }
+.jb-row > label, .jb-label-spacer { padding-top: 7px; text-align: right; font-size: 13px; color: var(--text); }
+.jb-control { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.jb-control input:not([type="checkbox"]), .jb-control select, .jb-control textarea {
+  width: 100%; font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 5px; padding: 7px 10px; transition: border-color .12s, box-shadow .12s;
+}
+.jb-control textarea { resize: vertical; min-height: 64px; }
+.jb-control input:not([type="checkbox"]):focus, .jb-control select:focus, .jb-control textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.jb-control .hint { font-size: 12px; color: var(--muted); }
+.jb-control .field-error { font-size: 12px; color: var(--danger); }
+.jb-body .check { margin: 6px 0 0; }
+.jb-body .alert { margin: 0 0 14px; }
+
+/* drop-down: own arrow with room on the right instead of the browser's cramped one */
+.jb-control select.jb-select {
+  appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 40px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center; background-size: 12px;
+}
+.jb-select option { background: var(--surface); color: var(--text); }
+
+.input-with-button { position: relative; }
+.input-with-button input { padding-right: 42px !important; }
+.folder-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 30px; height: 26px; display: grid; place-items: center; cursor: pointer; color: var(--muted); background: transparent; border: 0; border-radius: 4px; }
+.folder-btn:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+.jb-footer { flex: none; display: flex; justify-content: center; gap: 12px; padding: 14px 22px 16px; border-top: 1px solid var(--border); background: var(--surface); }
+.jb-footer .btn { min-width: 130px; }
+
+/* Select Location */
+.picker-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px 18px 10px; }
+.picker-path { display: flex; gap: 6px; }
+.picker-path input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 6px 10px; }
+.picker-path input:focus, .picker-row.naming input:focus { outline: none; border-color: var(--accent); }
+.tool-btn { flex: none; height: 32px; min-width: 32px; padding: 0 10px; display: inline-grid; place-items: center; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; }
+.tool-btn:hover:not(:disabled) { border-color: var(--accent); }
+.tool-btn:disabled { opacity: .45; cursor: default; }
+.picker-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
+.chip:hover { color: var(--accent); border-color: var(--accent); }
+.picker-list { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px 0; scrollbar-width: thin; }
+.picker-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; font-size: 13px; cursor: default; user-select: none; color: var(--text); }
+.picker-row svg { flex: none; color: var(--accent); }
+.picker-row:hover { background: var(--surface-2); }
+.picker-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.picker-row.selected { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.picker-row.naming { cursor: auto; }
+.picker-row.naming input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; }
+.picker-chosen { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-chosen strong { color: var(--text); font-weight: 500; }
+.picker-body .alert { margin: 0; }

@@ -1,8 +1,10 @@
 package com.orbit.backend.entity;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -11,6 +13,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -36,6 +40,14 @@ public class User {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    /** One user has many refresh tokens (inverse side of {@link RefreshToken#getUser()}). */
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<RefreshToken> refreshTokens = new ArrayList<>();
+
+    /** One user has many projects (inverse side of {@link Project#getUser()}). */
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Project> projects = new ArrayList<>();
 
     @PrePersist
     void onCreate() {

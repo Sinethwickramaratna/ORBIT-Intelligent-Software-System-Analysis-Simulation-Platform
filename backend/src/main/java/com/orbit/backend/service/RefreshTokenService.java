@@ -5,6 +5,7 @@ import com.orbit.backend.entity.RefreshToken;
 import com.orbit.backend.exception.ApiException;
 import com.orbit.backend.exception.ErrorCode;
 import com.orbit.backend.repository.RefreshTokenRepository;
+import com.orbit.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ public class RefreshTokenService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final RefreshTokenRepository repository;
+    private final UserRepository userRepository;
     private final OrbitProperties properties;
 
     public record IssuedRefreshToken(String rawToken, Instant expiresAt) {
@@ -44,7 +46,7 @@ public class RefreshTokenService {
         String raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         Instant now = Instant.now();
         Instant expiresAt = now.plus(properties.jwt().refreshTokenHours(), ChronoUnit.HOURS);
-        repository.save(new RefreshToken(UUID.randomUUID(), hash(raw), userId, now, expiresAt));
+        repository.save(new RefreshToken(UUID.randomUUID(), hash(raw), userRepository.getReferenceById(userId), now, expiresAt));
         log.debug("Created refresh token for user {} expiring at {}", userId, expiresAt);
         return new IssuedRefreshToken(raw, expiresAt);
     }

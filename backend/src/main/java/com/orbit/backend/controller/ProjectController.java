@@ -1,6 +1,9 @@
 package com.orbit.backend.controller;
 
+import com.orbit.backend.dto.request.CreateFolderRequest;
 import com.orbit.backend.dto.request.CreateProjectRequest;
+import com.orbit.backend.dto.response.FolderBrowseResponse;
+import com.orbit.backend.service.FolderBrowseService;
 import com.orbit.backend.dto.response.ProjectConfigResponse;
 import com.orbit.backend.dto.response.ProjectInspectResponse;
 import com.orbit.backend.dto.response.ProjectResponse;
@@ -30,6 +33,7 @@ import java.util.UUID;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final FolderBrowseService folderBrowseService;
 
     @GetMapping
     public List<ProjectResponse> list(@AuthenticationPrincipal AuthenticatedUser principal) {
@@ -53,6 +57,19 @@ public class ProjectController {
     @GetMapping("/inspect")
     public ProjectInspectResponse inspect(@RequestParam(name = "location", required = false) String location) {
         return projectService.inspect(location);
+    }
+
+    /** Sub-folders of {@code path} (empty = the starting folder) for the "choose a folder" window. */
+    @GetMapping("/browse")
+    public FolderBrowseResponse browse(@RequestParam(name = "path", required = false) String path) {
+        return folderBrowseService.browse(path);
+    }
+
+    /** "New Folder" inside the chooser. */
+    @PostMapping("/browse/folder")
+    @ResponseStatus(HttpStatus.CREATED)
+    public FolderBrowseResponse createFolder(@Valid @RequestBody CreateFolderRequest request) {
+        return folderBrowseService.browse(folderBrowseService.createFolder(request.parent(), request.name()));
     }
 
     @GetMapping("/{projectId}")

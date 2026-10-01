@@ -9,9 +9,9 @@ import java.util.UUID;
 
 public interface ProjectRepository extends JpaRepository<Project, UUID> {
 
-    List<Project> findByUserIdOrderByCreatedAtDesc(UUID userId);
+    List<Project> findByUser_UserIdOrderByCreatedAtDesc(UUID userId);
 
-    Optional<Project> findByProjectIdAndUserId(UUID projectId, UUID userId);
+    Optional<Project> findByProjectIdAndUser_UserId(UUID projectId, UUID userId);
 
-    boolean existsByUserIdAndLocation(UUID userId, String location);
+    boolean existsByUser_UserIdAndLocation(UUID userId, String location);
 }
