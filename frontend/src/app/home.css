@@ -184,6 +184,11 @@
   height: 34px; display: inline-flex; align-items: center; gap: 8px; padding: 0 8px 0 14px; font-size: 13px;
   background: var(--surface); border: 1px solid var(--border); border-top: 0; border-left: 0; border-bottom-color: var(--accent);
 }
+.project-tab { transition: margin-left .2s ease; }
+/* Sidebar hidden: the show button floats at the top-left, so move the project tab clear of it */
+@media (min-width: 761px) {
+  .workbench-body.sidebar-hidden .project-tab { margin-left: 40px; border-left: 1px solid var(--border); }
+}
 .project-tab-name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icon-btn.small { width: 20px; height: 20px; border-color: transparent; border-radius: 3px; }
 
