@@ -10,6 +10,7 @@ import com.orbit.backend.entity.Project;
 import com.orbit.backend.exception.ApiException;
 import com.orbit.backend.exception.ErrorCode;
 import com.orbit.backend.repository.ProjectRepository;
+import com.orbit.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -28,6 +29,7 @@ import java.util.UUID;
 public class ProjectService {
 
     private final ProjectRepository projectRepository;
+    private final UserRepository userRepository;
     private final ProjectPathResolver pathResolver;
     private final GitService gitService;
     private final ProjectFileService fileService;
@@ -39,7 +41,7 @@ public class ProjectService {
         }
         ProjectPathResolver.Resolved where = pathResolver.resolve(request.location());
 
-        for (Project existing : projectRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
+        for (Project existing : projectRepository.findByUser_UserIdOrderByCreatedAtDesc(userId)) {
             if (ProjectPathResolver.sameLocation(existing.getLocation(), where.location())) {
                 throw new ApiException(ErrorCode.PROJECT_ALREADY_EXISTS);
             }
@@ -82,7 +84,7 @@ public class ProjectService {
         project.setLocation(where.location());
         project.setProjectType(request.projectType());
         project.setDescription(blankToNull(request.description()));
-        project.setUserId(userId);
+        project.setUser(userRepository.getReferenceById(userId));
         try {
             project = projectRepository.saveAndFlush(project);
         } catch (DataIntegrityViolationException e) {
@@ -93,7 +95,7 @@ public class ProjectService {
     }
 
     public List<ProjectResponse> list(UUID userId) {
-        return projectRepository.findByUserIdOrderByCreatedAtDesc(userId).stream().map(this::describe).toList();
+        return projectRepository.findByUser_UserIdOrderByCreatedAtDesc(userId).stream().map(this::describe).toList();
     }
 
     public ProjectResponse get(UUID userId, UUID projectId) {
@@ -130,7 +132,7 @@ public class ProjectService {
 
     private Project find(UUID userId, UUID projectId) {
         // someone else's project looks exactly like a missing one
-        return projectRepository.findByProjectIdAndUserId(projectId, userId)
+        return projectRepository.findByProjectIdAndUser_UserId(projectId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
     }
 

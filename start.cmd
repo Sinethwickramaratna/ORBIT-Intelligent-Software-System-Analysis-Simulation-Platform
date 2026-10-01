@@ -25,5 +25,9 @@ if errorlevel 1 (
 
 docker compose up -d --build
 if errorlevel 1 exit /b 1
+
+rem Small helper (minimized window) that applies folder changes made in ORBIT's Settings by re-creating the containers.
+start "ORBIT helper" /min cmd /c "scripts\orbit-watch.cmd"
+
 echo.
 echo ORBIT is starting - open http://localhost:3000

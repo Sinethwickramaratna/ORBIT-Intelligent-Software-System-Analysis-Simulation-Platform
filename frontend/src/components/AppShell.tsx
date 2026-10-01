@@ -18,7 +18,7 @@ type Phase = "loading" | "unreachable" | "theme" | "environment" | "database" | 
  */
 function phaseFor(status: SetupStatus): Phase {
   if (!status.themeSelected && !hasChosenTheme()) return "theme";
-  if (!status.secretKeyConfigured || !status.databaseCredentialsConfigured) return "environment";
+  if (!status.secretKeyConfigured || !status.databaseCredentialsConfigured || status.foldersSetupNeeded) return "environment";
   if (status.databaseState !== "READY") return "database";
   if (!status.hasUsers) return "register";
   return "login";

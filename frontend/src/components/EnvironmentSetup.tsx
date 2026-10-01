@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { ApiError, api, type SetupStatus } from "@/lib/api";
 import OnboardingShell from "./OnboardingShell";
+import FoldersEditor, { validateFolders } from "./FoldersEditor";
 import PasswordInput from "./PasswordInput";
 
 const MIN_SECRET = 32;
@@ -23,11 +24,14 @@ interface Props {
 export default function EnvironmentSetup({ status, onDone }: Props) {
   const needSecret = !status.secretKeyConfigured;
   const needDb = !status.databaseCredentialsConfigured;
+  const needFolders = status.foldersSetupNeeded;
+  const onlyFolders = needFolders && !needSecret && !needDb;
 
   const [secret, setSecret] = useState("");
   const [dbUser, setDbUser] = useState("");
   const [dbPassword, setDbPassword] = useState("");
   const [dbPasswordConfirm, setDbPasswordConfirm] = useState("");
+  const [folders, setFolders] = useState<string[]>([""]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,11 +56,19 @@ export default function EnvironmentSetup({ status, onDone }: Props) {
         return;
       }
     }
+    if (needFolders) {
+      const problem = validateFolders(folders);
+      if (problem) {
+        setError(problem);
+        return;
+      }
+    }
     setSaving(true);
     try {
       await api.saveEnvironment({
         ...(needSecret ? { secretKey: secret.trim() } : {}),
         ...(needDb ? { dbUsername: dbUser.trim(), dbPassword } : {}),
+        ...(needFolders ? { folders: folders.map((f) => f.trim()).filter(Boolean) } : {}),
       });
       onDone();
     } catch (err) {
@@ -69,10 +81,11 @@ export default function EnvironmentSetup({ status, onDone }: Props) {
   return (
     <OnboardingShell step={1}>
       <div className="eyebrow">Environment</div>
-      <h2 className="title">Set up your environment</h2>
+      <h2 className="title">{onlyFolders ? "Choose your project folders" : "Set up your environment"}</h2>
       <p className="lead">
-        These values are unique to this computer. They are saved to the <code>.env</code> file in the project root
-        (never committed to git) and used to create your own local database.
+        {onlyFolders
+          ? "ORBIT runs in Docker, so it can only open the drives and folders you list here. They are saved to the .env file in the project root."
+          : "These values are unique to this computer. They are saved to the .env file in the project root (never committed to git) and used to create your own local database."}
       </p>
       {error && <div className="alert" role="alert">{error}</div>}
       <form onSubmit={submit} noValidate>
@@ -108,8 +121,18 @@ export default function EnvironmentSetup({ status, onDone }: Props) {
             </div>
           </>
         )}
+        {needFolders && (
+          <div className="field">
+            <label>Folders ORBIT can open (ORBIT_MOUNT)</label>
+            <FoldersEditor value={folders} onChange={setFolders} idPrefix="env-folder" />
+            <span className="hint">
+              Leave empty to use only ORBIT&apos;s own <code>projects</code> folder. You can change this later in Settings.
+              After changing it, run <code>start.cmd</code> (Windows) or <code>./start.sh</code> once to apply it.
+            </span>
+          </div>
+        )}
         <button className="btn full" type="submit" disabled={saving}>
-          {saving ? "Saving…" : "Save & create database"}
+          {saving ? "Saving…" : onlyFolders ? "Save" : "Save & create database"}
         </button>
       </form>
     </OnboardingShell>

@@ -13,12 +13,29 @@ export interface SetupStatus {
   hasUsers: boolean;
   themeSelected: boolean;
   theme: string | null;
+  /** Docker only: the drives/folders ORBIT may open still have to be chosen. */
+  foldersSetupNeeded: boolean;
+  /** .env lists other folders than the running backend can open: containers must be re-created. */
+  foldersRestartRequired: boolean;
+  folders: string[];
 }
 
 export interface EnvironmentInput {
   secretKey?: string;
   dbUsername?: string;
   dbPassword?: string;
+  folders?: string[];
+}
+
+export interface FolderSettings {
+  folders: string[];
+  active: string[];
+  restartRequired: boolean;
+  editable: boolean;
+  max: number;
+  /** The host helper is running: saving re-creates the containers by itself. */
+  autoApply: boolean;
+  applying: boolean;
 }
 
 export interface User {
@@ -224,6 +241,9 @@ export const api = {
     return res.user as User;
   },
 
+  getFolderSettings: () => authed<FolderSettings>("/api/settings/folders"),
+  saveFolderSettings: (folders: string[]) =>
+    authed<FolderSettings>("/api/settings/folders", { method: "PUT", body: JSON.stringify({ folders }) }),
   listProjects: () => authed<Project[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     authed<Project>("/api/projects", { method: "POST", body: JSON.stringify(input) }),

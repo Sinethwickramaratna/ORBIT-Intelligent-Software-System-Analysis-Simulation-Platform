@@ -23,5 +23,10 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 docker compose up -d --build || exit 1
+
+# Small helper that applies folder changes made in ORBIT's Settings (re-creates the containers for you).
+# Stop it with: ./scripts/orbit-watch.sh stop
+nohup sh scripts/orbit-watch.sh >/dev/null 2>&1 &
+
 echo
 echo "ORBIT is starting - open http://localhost:3000"

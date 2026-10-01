@@ -38,6 +38,20 @@ cd frontend && npm install && npm run dev  # 3. UI  on http://localhost:3000
 
 The backend reads/writes `../.env` (the repo-root file) by default. Override with `ORBIT_ENV_FILE`.
 
+## Quick guide - using ORBIT
+
+1. **Start it:** double-click `start.cmd` (Windows) or run `./start.sh`, then open http://localhost:3000.
+2. **First-run screens (once):** pick a theme -> enter a secret key (use *Generate*), a database username/password and the
+   drives/folders ORBIT may open -> wait for the database -> create your account -> sign in.
+3. **Create a project:** on the home page click **Create New Project**, enter a name, press the folder button to choose the
+   project folder (or type it), pick the project type, add an optional description, keep *Initialize Git repository*
+   ticked for a new folder (it is skipped automatically if the folder already is a Git repository) and click **Create Project**.
+4. **Open a project:** it opens right away, showing its folders and files on the right; click a project in the left
+   **Projects** panel any time to open it again (the arrow on the panel edge or `Ctrl+B` hides the panel).
+5. **Add or change drives later:** gear icon in the Projects panel -> **Settings** -> edit the folders -> **Save**, then
+   ORBIT applies it by itself (the small ORBIT helper window that `start.cmd` opens does this).
+6. **Stop / reset:** `docker compose down` stops everything and keeps your data; see *Database persistence* to start from zero.
+
 ## First-run flow
 
 1. **Theme** – pick a colour theme (Orbit Dark/Light, VS Code Dark+/Light+, Monokai, Solarized, High Contrast). It is
@@ -51,6 +65,7 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
    | `DB_PASSWORD` | yes | ≥ 8 chars |
    | `DB_NAME` | no – default `orbit` | |
    | `DB_PORT` | no – default `5433` | host port of the container |
+   | `ORBIT_MOUNT_1` … `ORBIT_MOUNT_8` | yes (optional) | drives/folders ORBIT may open, see below |
 
    Allowed characters in the secret/password: letters, digits and `!@%^&*()_+-=[]{};:,.<>?/~|` (no spaces, quotes, `$`, `#`, `\`), because the same file is read by Spring, Docker Compose and a shell script.
 3. **Database** – PostgreSQL starts with your credentials; the backend connects and Flyway creates the tables.
@@ -62,20 +77,41 @@ The backend starts *without* a database (only `/api/setup/**` works; every other
 
 ## Which folders ORBIT can open (Docker)
 
-The backend runs in a container and cannot see your disks by itself, so you choose what it may open in `.env`
-(up to 8 entries, any OS, forward slashes):
+The backend runs in a container and cannot see your disks by itself, so you choose the drives/folders it may open
+(up to 8). The easiest way is the app itself:
+
+* **First run:** the *Environment* screen has a **Folders ORBIT can open** section next to the secret key and database
+  password. Type a drive or folder per row (`E:/`, `D:/Work`, `/Users/you/code`, `/home/you/code` - forward slashes),
+  or leave it empty to use only ORBIT's own `projects` folder. If you upgraded from an older version, the screen
+  appears once more with just this section.
+* **Later:** click the gear (Settings) at the bottom of the Projects panel, edit the list and press **Save**.
+
+Docker only applies a mount change when the containers are re-created, and the app cannot do that to itself (it
+deliberately has no access to Docker). So `start.cmd` / `./start.sh` also start a tiny **helper** on your computer
+(a minimized window on Windows, a background process on Linux/macOS; `scripts/orbit-watch.cmd` / `.sh`). When you
+press **Save**, ORBIT leaves a request file in `.orbit-signal/`, the helper runs `docker compose up -d` and ORBIT
+restarts for about a minute - nothing else to do, your database and projects are kept. Its log is
+`.orbit-signal/apply.log`.
+
+If the helper is not running (you started with plain `docker compose up`, closed its window, or rebooted), ORBIT
+tells you so after **Save** - then run **`start.cmd`** (Windows) or **`./start.sh`** once (or `docker compose up -d`).
+Stop the helper on Linux/macOS with `./scripts/orbit-watch.sh stop`.
+
+The values are stored in `.env` as `ORBIT_MOUNT_1` ... `ORBIT_MOUNT_8` (plus `ORBIT_MOUNTS_CONFIGURED=true`); you can still
+edit that file by hand:
 
 ```
 ORBIT_MOUNT_1=E:/             # a whole drive (Windows)
-ORBIT_MOUNT_2=D:/Work         # or just a folder
+ORBIT_MOUNT_2=D:/My Work      # or just a folder (spaces are fine)
 # macOS: ORBIT_MOUNT_1=/Users/you/code      Linux: ORBIT_MOUNT_1=/home/you/code
 ```
 
-Then `docker compose up -d --build`. In **Create New Project** the folder button opens a chooser that starts at the list of
-these drives/folders; you can also type a path (`E:\Work\my-app` is translated to the matching mount). The path you
-see and the one stored in the database are always your real path. Notes:
+In **Create New Project** the folder button opens a chooser that starts at the list of these drives/folders; you can also
+type a path (`E:\Work\my-app` is translated to the matching mount). The path you see and the one stored in the database
+are always your real path. Notes:
 
-* ORBIT can read **and write** everything below a mounted entry - mount your project drives/folders, not a system drive.
+* ORBIT can read **and write** everything below a listed entry - list your project drives/folders, not a system drive.
+* Not allowed in a path: ``" ' # $ ` | , * ? < >``, `..`, network paths (`\\server\share` - map it to a drive letter) and `/` alone.
 * Nothing listed = the `./projects` folder next to `docker-compose.yml`. `ORBIT_PROJECTS_DIR` from older versions still works as slot 1.
 * Docker Desktop (Windows/macOS) must be allowed to share the drive/folder (Settings → Resources → File sharing; automatic with WSL 2).
   On Linux the folder must be writable by the container user.
@@ -106,9 +142,10 @@ Protected (`Authorization: Bearer <access token>`): `POST /api/auth/logout`, `GE
 `GET|PUT|DELETE /api/users/{id}` (update/delete: own account only).
 Projects (own projects only): `GET|POST /api/projects`, `GET /api/projects/config`, `GET /api/projects/inspect?location=`,
 `GET /api/projects/{id}`, `GET /api/projects/{id}/tree?path=` (one folder level, lazily),
-`GET /api/projects/browse?path=` and `POST /api/projects/browse/folder` (folder chooser: only the mounted folders in Docker).
+`GET /api/projects/browse?path=` and `POST /api/projects/browse/folder` (folder chooser: only the mounted folders in Docker),
+`GET|PUT /api/settings/folders` (the drives/folders ORBIT may open).
 
-`POST /api/setup/environment` accepts `{secretKey?, dbUsername?, dbPassword?}` and only the values that are still
+`POST /api/setup/environment` accepts `{secretKey?, dbUsername?, dbPassword?, folders?}` and only the values that are still
 missing; anything already configured is rejected with `409 ENVIRONMENT_ALREADY_CONFIGURED`.
 
 Errors are JSON: `{timestamp,status,code,message,path,fieldErrors?}` — e.g. `USER_NOT_FOUND`, `INVALID_PASSWORD`,

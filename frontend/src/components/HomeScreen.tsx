@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { api, type Project, type User } from "@/lib/api";
+import { api, type FolderSettings, type Project, type User } from "@/lib/api";
+import SettingsDialog from "./SettingsDialog";
+import { useFolderApply } from "@/lib/useFolderApply";
 import ProjectDialog from "./ProjectDialog";
 import FileTree from "./FileTree";
 
@@ -87,6 +89,13 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [folderSettings, setFolderSettings] = useState<FolderSettings | null>(null);
+  const applyGaveUp = useFolderApply(folderSettings, setFolderSettings);
+
+  useEffect(() => {
+    api.getFolderSettings().then(setFolderSettings).catch(() => setFolderSettings(null));
+  }, []);
 
   useEffect(() => {
     api.listProjects().then(setProjects).catch(() => setProjects([]));
@@ -174,6 +183,25 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
         </div>
       </header>
 
+      {folderSettings?.restartRequired && (
+        <div className="notice-bar" role="status">
+          {folderSettings.autoApply && !applyGaveUp ? (
+            <span>
+              Applying your folder changes - ORBIT restarts for a moment and this message disappears when it is done.
+            </span>
+          ) : (
+            <span>
+              {folderSettings.autoApply
+                ? "The folder change was not applied automatically. "
+                : "Folder access was changed. "}
+              Run <code>start.cmd</code> (Windows) or <code>./start.sh</code> once (or <code>docker compose up -d</code>)
+              to apply it. Until then ORBIT can only open: <strong>{folderSettings.active.join(", ")}</strong>
+            </span>
+          )}
+          <button type="button" className="btn ghost" onClick={() => setSettingsOpen(true)}>Settings</button>
+        </div>
+      )}
+
       <div className={`workbench-body${sidebarOpen ? "" : " sidebar-hidden"}`}>
         <SidebarToggle open={sidebarOpen} onToggle={() => setOpen(!sidebarOpen)} />
         <aside id="projects-sidebar" className={`sidebar${sidebarOpen ? "" : " collapsed"}`} aria-label="Projects">
@@ -224,7 +252,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
               <div className="username" title={user.userName}>
                 {user.userName}
               </div>
-              <button type="button" className="icon-btn" aria-label="Settings" title="Settings" tabIndex={tab}>
+              <button type="button" className="icon-btn" aria-label="Settings" title="Settings" tabIndex={tab} onClick={() => setSettingsOpen(true)}>
                 <SettingsIcon />
               </button>
             </div>
@@ -291,6 +319,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
         )}
       </div>
 
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onSaved={setFolderSettings} />}
       {creating && <ProjectDialog onClose={() => setCreating(false)} onCreated={onCreated} />}
 
       <footer className="statusbar">

@@ -14,6 +14,7 @@ import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,6 +41,28 @@ public class EnvFileService {
             throw new ApiException(ErrorCode.ENV_FILE_NOT_WRITABLE, describe(file, cause));
         }
         log.info("Saved {} to {}", values.keySet(), file);
+    }
+
+    /** All {@code KEY=VALUE} entries of the .env file (last one wins); empty when the file does not exist. */
+    public synchronized Map<String, String> readAll() {
+        Path file = Path.of(properties.envFile()).toAbsolutePath().normalize();
+        Map<String, String> result = new LinkedHashMap<>();
+        if (!Files.isRegularFile(file)) {
+            return result;
+        }
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                String t = line.strip();
+                int eq = t.indexOf('=');
+                if (t.isEmpty() || t.startsWith("#") || eq <= 0) {
+                    continue;
+                }
+                result.put(t.substring(0, eq).strip(), t.substring(eq + 1).strip());
+            }
+        } catch (IOException e) {
+            log.warn("Could not read {}: {}", file, e.getMessage());
+        }
+        return result;
     }
 
     /** A message the setup screen can show: says what is wrong and how to fix it. */

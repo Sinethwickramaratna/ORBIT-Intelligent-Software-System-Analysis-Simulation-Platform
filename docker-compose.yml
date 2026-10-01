@@ -25,7 +25,7 @@ services:
         if [ -d /project/.env ]; then rmdir /project/.env || { echo "ERROR: .env is a non-empty folder - delete it"; exit 1; }; fi
         if [ ! -f /project/.env ]; then cp /project/.env.example /project/.env && echo "Created .env from .env.example"; fi
         chmod 666 /project/.env 2>/dev/null || true
-        mkdir -p /project/projects /project/.orbit-unused && chmod 777 /project/projects 2>/dev/null || true
+        mkdir -p /project/projects /project/.orbit-unused /project/.orbit-signal && chmod 777 /project/projects /project/.orbit-signal 2>/dev/null || true
     volumes:
       - ./:/project
 
@@ -78,10 +78,14 @@ services:
       # Project folders: inside Docker the backend only sees the host folders/drives mounted below (ORBIT_MOUNT_1..8
       # in .env, e.g. E:/  D:/Work  /home/you/code). A Location typed as E:\\Work\\my-app is translated to the
       # matching mount. Slot 1 falls back to ORBIT_PROJECTS_DIR, then to ./projects. Unused slots have an empty host.
+      ORBIT_SIGNAL_DIR: /app/signal
       ORBIT_PROJECTS_MOUNTS: "${ORBIT_MOUNT_1:-${ORBIT_PROJECTS_DIR:-./projects}}|/mnt/host/1,${ORBIT_MOUNT_2:-}|/mnt/host/2,${ORBIT_MOUNT_3:-}|/mnt/host/3,${ORBIT_MOUNT_4:-}|/mnt/host/4,${ORBIT_MOUNT_5:-}|/mnt/host/5,${ORBIT_MOUNT_6:-}|/mnt/host/6,${ORBIT_MOUNT_7:-}|/mnt/host/7,${ORBIT_MOUNT_8:-}|/mnt/host/8"
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
+      # Lets the app ask the host helper (scripts/orbit-watch.*, started by start.cmd / start.sh) to re-create the
+      # containers after you change the folders in Settings. Contains only two tiny signal files.
+      - ./.orbit-signal:/app/signal
       # The setup screen writes JWT_SECRET / DB_USERNAME / DB_PASSWORD into this file (DB_NAME defaults to orbit).
       # Created by the init-env service if it does not exist yet
       - ./.env:/app/.env
