@@ -16,6 +16,26 @@ import FileTree from "./FileTree";
  */
 
 const SIDEBAR_KEY = "orbit.sidebar.open";
+const OPEN_PROJECT_KEY = "orbit.open.project";
+
+/** What is kept in the browser so the open project survives a refresh until the user closes it. */
+interface StoredProject {
+  projectId: string;
+  projectName: string;
+  location: string;
+}
+
+function readStoredProject(): StoredProject | null {
+  try {
+    const raw = localStorage.getItem(OPEN_PROJECT_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (v && typeof v.projectId === "string" && typeof v.projectName === "string" && typeof v.location === "string") return v;
+  } catch {
+    /* storage unavailable or corrupt */
+  }
+  return null;
+}
 
 const WALKTHROUGHS = [
   { title: "Getting started with ORBIT", desc: "A five-minute tour of the workspace and how a project moves through it." },
@@ -90,7 +110,20 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [stored, setStored] = useState<StoredProject | null>(() => readStoredProject());
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const activeId = stored?.projectId ?? null;
+  function setActiveId(id: string | null) {
+    const p = id ? projects.find((x) => x.projectId === id) : null;
+    const next = p ? { projectId: p.projectId, projectName: p.projectName, location: p.location } : null;
+    setStored(next);
+    try {
+      if (next) localStorage.setItem(OPEN_PROJECT_KEY, JSON.stringify(next));
+      else localStorage.removeItem(OPEN_PROJECT_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -102,10 +135,29 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
   }, []);
 
   useEffect(() => {
-    api.listProjects().then(setProjects).catch(() => setProjects([]));
+    api
+      .listProjects()
+      .then((list) => {
+        setProjects(list);
+        setProjectsLoaded(true);
+      })
+      .catch(() => undefined); // keep showing the stored project if the list cannot be loaded
   }, []);
 
-  const active = projects.find((p) => p.projectId === activeId) ?? null;
+  const found = projects.find((p) => p.projectId === activeId) ?? null;
+  const active = found ?? (stored ? { ...stored, createdAt: "" } : null);
+
+  // The stored project no longer exists (deleted elsewhere): drop it.
+  useEffect(() => {
+    if (projectsLoaded && stored && !projects.some((p) => p.projectId === stored.projectId)) {
+      setStored(null);
+      try {
+        localStorage.removeItem(OPEN_PROJECT_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [projectsLoaded, projects, stored]);
   const q = query.trim().toLowerCase();
   const visible = q
     ? projects.filter((p) => p.projectName.toLowerCase().includes(q) || p.location.toLowerCase().includes(q))
@@ -113,13 +165,18 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
 
   function onDeleted(projectId: string) {
     setProjects((list) => list.filter((p) => p.projectId !== projectId));
-    setActiveId((id) => (id === projectId ? null : id));
+    if (activeId === projectId) setActiveId(null);
     setDeleting(null);
   }
 
   function onCreated(project: Project) {
     setProjects((list) => [project, ...list.filter((p) => p.projectId !== project.projectId)]);
-    setActiveId(project.projectId);
+    setStored({ projectId: project.projectId, projectName: project.projectName, location: project.location });
+    try {
+      localStorage.setItem(OPEN_PROJECT_KEY, JSON.stringify({ projectId: project.projectId, projectName: project.projectName, location: project.location }));
+    } catch {
+      /* ignore */
+    }
     setCreating(false);
   }
 
@@ -265,7 +322,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
           <div className="project-view">
             <main className="project-middle" aria-label={`${active.projectName} workspace`}>
               <div className="project-tab">
-                <span className="project-tab-name" title={`${active.location}\nCreated ${new Date(active.createdAt).toLocaleString()}`}>{active.projectName}</span>
+                <span className="project-tab-name" title={active.createdAt ? `${active.location}\nCreated ${new Date(active.createdAt).toLocaleString()}` : active.location}>{active.projectName}</span>
                 <button type="button" className="icon-btn small" aria-label="Close project" title="Close project" onClick={() => setActiveId(null)}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
                 </button>

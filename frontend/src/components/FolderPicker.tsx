@@ -25,6 +25,7 @@ export default function FolderPicker({ initialPath, onSelect, onClose }: Props) 
   const [loading, setLoading] = useState(true);
   const [naming, setNaming] = useState(false);
   const [newName, setNewName] = useState("");
+  const [search, setSearch] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
 
   const go = useCallback(async (path?: string, fallbackToStart = false) => {
@@ -36,6 +37,7 @@ export default function FolderPicker({ initialPath, onSelect, onClose }: Props) 
       setTyped(v.path);
       setPicked(null);
       setNaming(false);
+      setSearch("");
     } catch (e) {
       if (fallbackToStart && path) {
         // the typed location does not exist yet / is not reachable: start from the default folder instead
@@ -92,6 +94,8 @@ export default function FolderPicker({ initialPath, onSelect, onClose }: Props) 
   }
 
   const chosen = picked ?? view?.path ?? "";
+  const needle = search.trim().toLowerCase();
+  const filtered = view ? (needle ? view.folders.filter((f) => f.name.toLowerCase().includes(needle)) : view.folders) : [];
 
   return (
     <div className="modal-backdrop picker-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -118,6 +122,8 @@ export default function FolderPicker({ initialPath, onSelect, onClose }: Props) 
             </div>
           )}
 
+          <input type="search" className="picker-search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search folders" placeholder="Search folders…" spellCheck={false} disabled={!view || loading} />
+
           <div className="picker-list" role="listbox" aria-label="Folders">
             {naming && (
               <form className="picker-row naming" onSubmit={makeFolder}>
@@ -129,8 +135,9 @@ export default function FolderPicker({ initialPath, onSelect, onClose }: Props) 
             {loading && <div className="tree-note">Loading…</div>}
             {!loading && view && view.path === "" && view.folders.length > 0 && <div className="tree-note">Choose a drive or folder (double-click to open).</div>}
             {!loading && view && view.folders.length === 0 && !naming && <div className="tree-note">No sub-folders here.</div>}
+            {!loading && view && view.folders.length > 0 && filtered.length === 0 && <div className="tree-note">No folders match “{search}”.</div>}
             {!loading &&
-              view?.folders.map((f) => (
+              filtered.map((f) => (
                 <div
                   key={f.path}
                   role="option"

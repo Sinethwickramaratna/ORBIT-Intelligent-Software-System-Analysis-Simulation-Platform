@@ -1,17 +1,82 @@
+# ---- Secrets / local environment ----
 .env
+.env.*
+!.env.example
+!**/.env.example
+
+# ---- Frontend (Next.js) ----
 node_modules/
 .next/
-target/
-*.log
-.idea/
-.vscode/
-GATES.md
+frontend/out/
+frontend/coverage/
+frontend/next-env.d.ts
+*.tsbuildinfo
+.npm/
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
+# ---- Backend (Java / Maven) ----
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+.m2/
+backend/.mvn/repository/
+.mvn/wrapper/maven-wrapper.jar
+HELP.md
+*.class
+*.jar
+*.war
+hs_err_pid*
+.gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ---- Python services (llm-service, ml-service) ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ---- Logs, temp, build output ----
+*.log
+logs/
+*.tmp
+*.bak
+*.swp
+dist/
+coverage/
+
+# ---- IDE / OS ----
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+.sts4-cache/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Tooling / generated working files (not part of the product) ----
+GATES.md
+GATES-*.md
+.unlazy/
+.unlazy-hook-state.json
+.claude/settings.local.json
 graphify-out/
 _to_delete/
 backups/
-dist/
 
+# ---- ORBIT runtime folders ----
 # default projects folder and placeholder for unused mounts (see ORBIT_MOUNT_n in .env.example)
 /projects/
 /.orbit-unused/

@@ -286,6 +286,8 @@
 .picker-path { display: flex; gap: 6px; }
 .picker-path input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 6px 10px; }
 .picker-path input:focus, .picker-row.naming input:focus { outline: none; border-color: var(--accent); }
+.picker-search { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 6px 10px; width: 100%; box-sizing: border-box; }
+.picker-search:focus { outline: none; border-color: var(--accent); }
 .tool-btn { flex: none; height: 32px; min-width: 32px; padding: 0 10px; display: inline-grid; place-items: center; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; }
 .tool-btn:hover:not(:disabled) { border-color: var(--accent); }
 .tool-btn:disabled { opacity: .45; cursor: default; }
