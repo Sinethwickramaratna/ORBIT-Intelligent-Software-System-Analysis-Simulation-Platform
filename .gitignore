@@ -11,3 +11,6 @@ graphify-out/
 _to_delete/
 backups/
 dist/
+
+# folder mounted into the backend container (see ORBIT_PROJECTS_DIR)
+/projects/

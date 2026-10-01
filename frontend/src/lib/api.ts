@@ -28,6 +28,63 @@ export interface User {
   updatedAt: string;
 }
 
+export const PROJECT_TYPES = [
+  { value: "WEB_APPLICATION", label: "Web Application" },
+  { value: "DESKTOP_APPLICATION", label: "Desktop Application" },
+  { value: "MOBILE_APPLICATION", label: "Mobile Application" },
+  { value: "DISTRIBUTED_SYSTEM", label: "Distributed System" },
+  { value: "MICROSERVICES_SYSTEM", label: "Microservices System" },
+  { value: "BACKEND_API", label: "Backend / API" },
+  { value: "DATA_ML_SYSTEM", label: "Data / ML System" },
+  { value: "EMBEDDED_IOT_SYSTEM", label: "Embedded / IoT System" },
+  { value: "OTHER", label: "Other" },
+] as const;
+export type ProjectType = (typeof PROJECT_TYPES)[number]["value"];
+
+export interface Project {
+  projectId: string;
+  projectName: string;
+  location: string;
+  projectType: ProjectType;
+  projectTypeLabel: string;
+  description: string | null;
+  userId: string;
+  createdAt: string;
+  folderAvailable: boolean;
+  gitRepository: boolean;
+  gitStatus: "INITIALIZED" | "ALREADY_EXISTS" | "SKIPPED" | null;
+  folderCreated: boolean;
+}
+
+export interface CreateProjectInput {
+  projectName: string;
+  location: string;
+  projectType: ProjectType;
+  description?: string;
+  initGit: boolean;
+}
+
+export interface TreeEntry {
+  name: string;
+  path: string;
+  kind: "FOLDER" | "FILE";
+  size: number | null;
+  hasChildren: boolean;
+}
+
+export interface ProjectTree {
+  path: string;
+  entries: TreeEntry[];
+  truncated: boolean;
+}
+
+export interface LocationInspection {
+  valid: boolean;
+  message: string | null;
+  exists: boolean;
+  gitRepository: boolean;
+}
+
 interface TokenResponse {
   tokenType: string;
   accessToken: string;
@@ -153,6 +210,15 @@ export const api = {
     storeRefreshToken(res.refreshToken);
     return res.user as User;
   },
+
+  listProjects: () => authed<Project[]>("/api/projects"),
+  createProject: (input: CreateProjectInput) =>
+    authed<Project>("/api/projects", { method: "POST", body: JSON.stringify(input) }),
+  projectConfig: () => authed<{ root: string | null }>("/api/projects/config"),
+  inspectLocation: (location: string) =>
+    authed<LocationInspection>(`/api/projects/inspect?location=${encodeURIComponent(location)}`),
+  projectTree: (projectId: string, path = "") =>
+    authed<ProjectTree>(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`),
 
   currentUser: () => authed<User>("/api/users/me"),
 

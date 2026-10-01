@@ -25,6 +25,7 @@ services:
         if [ -d /project/.env ]; then rmdir /project/.env || { echo "ERROR: .env is a non-empty folder - delete it"; exit 1; }; fi
         if [ ! -f /project/.env ]; then cp /project/.env.example /project/.env && echo "Created .env from .env.example"; fi
         chmod 666 /project/.env 2>/dev/null || true
+        mkdir -p /project/projects && chmod 777 /project/projects 2>/dev/null || true
     volumes:
       - ./:/project
 
@@ -74,12 +75,18 @@ services:
       # Inside the compose network PostgreSQL is "postgres:5432" (overrides DB_PORT from .env)
       DB_HOST: postgres
       DB_PORT: "5432"
+      # Project folders: the backend only sees the one host folder mounted below. A project Location typed as
+      # E:\Projects\my-app is translated to /projects/my-app (set ORBIT_PROJECTS_DIR in .env, e.g. E:/Projects).
+      ORBIT_PROJECTS_HOST_ROOT: ${ORBIT_PROJECTS_DIR:-./projects}
+      ORBIT_PROJECTS_CONTAINER_ROOT: /projects
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       # The setup screen writes JWT_SECRET / DB_USERNAME / DB_PASSWORD into this file (DB_NAME defaults to orbit).
       # Created by the init-env service if it does not exist yet
       - ./.env:/app/.env
+      # The folder your projects live in (read + write: ORBIT creates project folders and runs `git init` there)
+      - ${ORBIT_PROJECTS_DIR:-./projects}:/projects
 
   frontend:
     build:

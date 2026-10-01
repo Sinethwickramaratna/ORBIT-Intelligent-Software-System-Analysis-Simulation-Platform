@@ -1,0 +1,153 @@
+"use client";
+
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { api, ApiError, PROJECT_TYPES, type LocationInspection, type Project, type ProjectType } from "@/lib/api";
+
+interface Props {
+  onClose: () => void;
+  onCreated: (project: Project) => void;
+}
+
+/** "Create New Project" window: name, location, type, description, optional git init. */
+export default function ProjectDialog({ onClose, onCreated }: Props) {
+  const uid = useId();
+  const [name, setName] = useState("");
+  const [location, setLocation] = useState("");
+  const [type, setType] = useState<ProjectType>("WEB_APPLICATION");
+  const [description, setDescription] = useState("");
+  const [initGit, setInitGit] = useState(true);
+  const [root, setRoot] = useState<string | null>(null);
+  const [inspection, setInspection] = useState<LocationInspection | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    nameRef.current?.focus();
+    api.projectConfig().then((c) => setRoot(c.root)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !busy) onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+
+  // Live feedback about the typed location (outside the mounted root? already a git repo?).
+  useEffect(() => {
+    const value = location.trim();
+    if (!value) {
+      setInspection(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api
+        .inspectLocation(value)
+        .then((r) => !cancelled && setInspection(r))
+        .catch(() => !cancelled && setInspection(null));
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [location]);
+
+  const hasRepo = inspection?.valid === true && inspection.gitRepository;
+  const locationProblem = inspection && !inspection.valid ? inspection.message : null;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const next: Record<string, string> = {};
+    if (!name.trim()) next.projectName = "Project name is required.";
+    if (!location.trim()) next.location = "Location is required.";
+    setErrors(next);
+    setServerError(null);
+    if (Object.keys(next).length) return;
+
+    setBusy(true);
+    try {
+      const project = await api.createProject({
+        projectName: name.trim(),
+        location: location.trim(),
+        projectType: type,
+        description: description.trim() || undefined,
+        initGit: hasRepo ? false : initGit,
+      });
+      onCreated(project);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setErrors(err.fieldErrors ?? {});
+        setServerError(err.message);
+      } else {
+        setServerError("Could not reach the server.");
+      }
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`} onSubmit={submit} noValidate>
+        <h2 id={`${uid}-title`} className="modal-title">Create New Project</h2>
+
+        <div className="mfield">
+          <label htmlFor={`${uid}-name`}>Project Name</label>
+          <input id={`${uid}-name`} ref={nameRef} value={name} maxLength={150} onChange={(e) => setName(e.target.value)} />
+          {errors.projectName && <span className="field-error">{errors.projectName}</span>}
+        </div>
+
+        <div className="mfield">
+          <label htmlFor={`${uid}-loc`}>Location</label>
+          <input
+            id={`${uid}-loc`}
+            value={location}
+            maxLength={1024}
+            placeholder={root ? `${root}/MyProject` : "Folder of the project"}
+            onChange={(e) => setLocation(e.target.value)}
+          />
+          {errors.location && <span className="field-error">{errors.location}</span>}
+          {!errors.location && locationProblem && <span className="field-error">{locationProblem}</span>}
+          {!errors.location && !locationProblem && root && (
+            <span className="hint">Must be inside {root}. A missing folder is created.</span>
+          )}
+        </div>
+
+        <div className="mfield">
+          <label htmlFor={`${uid}-type`}>Project Type</label>
+          <select id={`${uid}-type`} value={type} onChange={(e) => setType(e.target.value as ProjectType)}>
+            {PROJECT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mfield">
+          <label htmlFor={`${uid}-desc`}>Description <span className="optional">(optional)</span></label>
+          <textarea id={`${uid}-desc`} rows={3} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </div>
+
+        <label className={`check${hasRepo ? " disabled" : ""}`}>
+          <input
+            type="checkbox"
+            checked={hasRepo ? false : initGit}
+            disabled={hasRepo}
+            onChange={(e) => setInitGit(e.target.checked)}
+          />
+          <span>Initialize Git repository</span>
+        </label>
+        {hasRepo && <span className="hint check-note">This folder already has a Git repository, so none will be created.</span>}
+
+        {serverError && <div className="alert" role="alert">{serverError}</div>}
+
+        <div className="modal-actions">
+          <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn" disabled={busy}>{busy ? "Creating…" : "Create Project"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}

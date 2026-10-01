@@ -60,6 +60,13 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
 
 The backend starts *without* a database (only `/api/setup/**` works; every other API answers `503 DATABASE_NOT_READY`) so the setup screen can run first.
 
+## Projects folder (Docker)
+
+The backend runs in a container and cannot see your Windows/macOS folders. One host folder is mounted into it
+(`ORBIT_PROJECTS_DIR` in `.env`, default `./projects`, e.g. `ORBIT_PROJECTS_DIR=E:/Projects`) at `/projects`.
+A project **Location** must be inside that folder (`E:\Projects\MyApp` is used as `/projects/MyApp`); the path you typed is what is stored.
+After changing it run `docker compose up -d --build`. When the backend runs directly on your machine (Option B) any absolute path works.
+
 ## Database persistence
 
 Data lives in the Docker named volume `orbit_pgdata` on *your* machine (never in git).
@@ -75,6 +82,7 @@ Data lives in the Docker named volume `orbit_pgdata` on *your* machine (never in
 | `users` | `user_id` UUID PK, `user_name`, `password` (Argon2), `created_at`, `updated_at` |
 | `refresh_token_table` | `token_id` UUID PK, `token`, `user_id` FK→users, `created_at`, `expired_at` |
 | `app_settings` | `setting_key` PK, `setting_value`, `updated_at` (theme) |
+| `projects` | `project_id` UUID PK, `project_name`, `location`, `project_type` (enum: WEB_APPLICATION … OTHER), `description` (optional), `user_id` FK→users (1 user : N projects), `created_at`, `updated_at` |
 
 ## API
 
@@ -82,6 +90,8 @@ Public: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refre
 `GET /api/setup/status`, `POST /api/setup/environment`, `POST /api/setup/database/retry`, `GET|PUT /api/settings/theme`.
 Protected (`Authorization: Bearer <access token>`): `POST /api/auth/logout`, `GET /api/users`, `GET /api/users/me`,
 `GET|PUT|DELETE /api/users/{id}` (update/delete: own account only).
+Projects (own projects only): `GET|POST /api/projects`, `GET /api/projects/config`, `GET /api/projects/inspect?location=`,
+`GET /api/projects/{id}`, `GET /api/projects/{id}/tree?path=` (one folder level, lazily).
 
 `POST /api/setup/environment` accepts `{secretKey?, dbUsername?, dbPassword?}` and only the values that are still
 missing; anything already configured is rejected with `409 ENVIRONMENT_ALREADY_CONFIGURED`.

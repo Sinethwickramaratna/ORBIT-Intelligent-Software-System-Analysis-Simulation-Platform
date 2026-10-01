@@ -26,6 +26,14 @@ public enum ErrorCode {
     VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "Request validation failed"),
     INVALID_SETTING(HttpStatus.BAD_REQUEST, "Invalid setting value"),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "You are not allowed to do that"),
+    PROJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "Project not found"),
+    PROJECT_ALREADY_EXISTS(HttpStatus.CONFLICT, "You already have a project at that location"),
+    PROJECT_LOCATION_INVALID(HttpStatus.BAD_REQUEST, "The project location is not valid"),
+    PROJECT_LOCATION_OUTSIDE_ROOT(HttpStatus.BAD_REQUEST, "The project location is outside the folder ORBIT can access"),
+    PROJECT_LOCATION_NOT_DIRECTORY(HttpStatus.BAD_REQUEST, "The project location exists but is not a folder"),
+    PROJECT_FOLDER_UNAVAILABLE(HttpStatus.CONFLICT, "The project folder cannot be read right now"),
+    PROJECT_PATH_INVALID(HttpStatus.BAD_REQUEST, "That path is not inside the project"),
+    PROJECT_GIT_INIT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "Git could not be initialized in the project folder"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error");
 
     private final HttpStatus status;

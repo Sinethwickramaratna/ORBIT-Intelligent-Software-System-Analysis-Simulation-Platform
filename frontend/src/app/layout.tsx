@@ -4,6 +4,7 @@ import "@fontsource/antonio/400.css";
 import "@fontsource/source-code-pro/400.css";
 import "@fontsource/source-code-pro/600.css";
 import "./globals.css";
+import "./home.css";
 
 export const metadata: Metadata = {
   title: "ORBIT",
