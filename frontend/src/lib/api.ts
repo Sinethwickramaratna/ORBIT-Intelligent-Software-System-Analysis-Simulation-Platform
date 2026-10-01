@@ -227,7 +227,7 @@ export const api = {
   listProjects: () => authed<Project[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     authed<Project>("/api/projects", { method: "POST", body: JSON.stringify(input) }),
-  projectConfig: () => authed<{ root: string | null }>("/api/projects/config"),
+  projectConfig: () => authed<{ root: string | null; roots: string[] }>("/api/projects/config"),
   inspectLocation: (location: string) =>
     authed<LocationInspection>(`/api/projects/inspect?location=${encodeURIComponent(location)}`),
   browseFolders: (path?: string) =>

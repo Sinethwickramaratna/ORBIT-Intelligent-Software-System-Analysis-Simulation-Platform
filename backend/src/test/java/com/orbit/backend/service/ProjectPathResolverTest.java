@@ -107,4 +107,36 @@ class ProjectPathResolverTest {
         assertThat(ProjectPathResolver.sameLocation("/home/a/Shop", "/home/a/shop")).isFalse();
         assertThat(ProjectPathResolver.sameLocation("/home/a/shop", "/home/a/shop/")).isTrue();
     }
+
+    @Test
+    void severalMountsMapEachDriveAndPreferTheMostSpecificOne() {
+        var r = new ProjectPathResolver("E:/|/mnt/host/1,D:/Work|/mnt/host/2,E:/Projects|/mnt/host/3, |/mnt/host/4", null, null);
+        assertThat(r.visibleRoots()).containsExactly("E:/", "D:/Work", "E:/Projects");
+        assertThat(r.visibleRoot()).isEqualTo("E:/");
+
+        var onE = r.resolve("e:\\Games\\x");
+        assertThat(onE.path()).isEqualTo(java.nio.file.Path.of("/mnt/host/1/Games/x"));
+        assertThat(onE.location()).isEqualTo("E:/Games/x");
+
+        var onD = r.resolve("D:/Work/api");
+        assertThat(onD.path()).isEqualTo(java.nio.file.Path.of("/mnt/host/2/api"));
+        assertThat(onD.location()).isEqualTo("D:/Work/api");
+
+        // inside both E:/ and E:/Projects: the more specific mount is used, the stored text is identical either way
+        var nested = r.resolve("E:/Projects/app");
+        assertThat(nested.path()).isEqualTo(java.nio.file.Path.of("/mnt/host/3/app"));
+        assertThat(nested.location()).isEqualTo("E:/Projects/app");
+
+        assertThat(r.resolve("E:/").location()).isEqualTo("E:/");
+        assertThat(r.resolve("rel/dir").path()).isEqualTo(java.nio.file.Path.of("/mnt/host/1/rel/dir"));
+        assertRejected(r, "F:/x", ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT);
+        assertRejected(r, "D:/Elsewhere", ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT);
+        assertRejected(r, "D:/Work/../Secret", ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT);
+    }
+
+    @Test
+    void mountsFromTheLegacySinglePairStillWorkAndEmptySpecIsHostMode() {
+        assertThat(new ProjectPathResolver(null, "E:/Projects", "/projects").visibleRoots()).containsExactly("E:/Projects");
+        assertThat(new ProjectPathResolver(" | , |/x", null, null).confined()).isFalse();
+    }
 }

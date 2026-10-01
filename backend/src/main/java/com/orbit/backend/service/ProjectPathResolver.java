@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -30,31 +32,84 @@ public class ProjectPathResolver {
     public record Resolved(Path path, String location) {
     }
 
-    private final String hostRoot;       // normalized, or null
-    private final String containerRoot;  // normalized, or null
+    /** One folder of the user's computer that is mounted into the container. */
+    public record Mount(String host, Path container) {
+        /** What the user sees: the host path when known, otherwise the in-container path. */
+        public String display() {
+            return host;
+        }
+    }
+
+    private final List<Mount> mounts;  // empty = backend runs on the user's computer
 
     @Autowired
     public ProjectPathResolver(OrbitProperties properties) {
-        this(properties.projects() == null ? null : properties.projects().hostRootOrNull(),
+        this(properties.projects() == null ? null : properties.projects().mountsOrNull(),
+                properties.projects() == null ? null : properties.projects().hostRootOrNull(),
                 properties.projects() == null ? null : properties.projects().containerRootOrNull());
     }
 
+    /** Single mounted folder (kept for simplicity and tests). */
     public ProjectPathResolver(String hostRoot, String containerRoot) {
-        this.hostRoot = blank(hostRoot) ? null : tidy(hostRoot);
-        this.containerRoot = blank(containerRoot) ? null : tidy(containerRoot);
+        this(null, hostRoot, containerRoot);
     }
 
-    /** The folder users must keep their projects in, as shown in the UI; null when anywhere is fine. */
-    public String visibleRoot() {
-        if (containerRoot == null) {
-            return null;
+    /**
+     * @param mountSpec {@code host|container} pairs separated by commas (empty hosts are skipped), or null
+     * @param hostRoot  legacy single mount: host side (may be blank = show the container path)
+     * @param containerRoot legacy single mount: container side
+     */
+    public ProjectPathResolver(String mountSpec, String hostRoot, String containerRoot) {
+        List<Mount> list = new ArrayList<>();
+        if (!blank(mountSpec)) {
+            for (String pair : mountSpec.split(",")) {
+                int bar = pair.lastIndexOf('|');
+                if (bar < 0) {
+                    continue;
+                }
+                String host = pair.substring(0, bar);
+                String container = pair.substring(bar + 1);
+                if (blank(host) || blank(container)) {
+                    continue; // unused slot
+                }
+                list.add(new Mount(tidy(host), Path.of(tidy(container)).normalize()));
+            }
+        } else if (!blank(containerRoot)) {
+            String c = tidy(containerRoot);
+            list.add(new Mount(blank(hostRoot) ? c : tidy(hostRoot), Path.of(c).normalize()));
         }
-        return hostRoot != null ? hostRoot : containerRoot;
+        this.mounts = List.copyOf(list);
     }
 
-    /** The mounted root as this backend sees it (null when anywhere is allowed). */
-    public Path containerRootPath() {
-        return containerRoot == null ? null : Path.of(containerRoot).normalize();
+    /** True when the backend can only reach the mounted folders (Docker). */
+    public boolean confined() {
+        return !mounts.isEmpty();
+    }
+
+    public List<Mount> mounts() {
+        return mounts;
+    }
+
+    /** Mounted folders as the user writes them (e.g. {@code E:/}); empty when anywhere is fine. */
+    public List<String> visibleRoots() {
+        return mounts.stream().map(Mount::display).toList();
+    }
+
+    /** The first mounted folder as shown in the UI; null when anywhere is fine. */
+    public String visibleRoot() {
+        return mounts.isEmpty() ? null : mounts.get(0).display();
+    }
+
+    /** The mount whose in-container folder contains {@code path}, or null. */
+    public Mount mountOf(Path path) {
+        Path p = path.normalize();
+        Mount best = null;
+        for (Mount m : mounts) {
+            if (p.startsWith(m.container()) && (best == null || m.container().getNameCount() > best.container().getNameCount())) {
+                best = m;
+            }
+        }
+        return best;
     }
 
     public Resolved resolve(String raw) {
@@ -68,7 +123,7 @@ public class ProjectPathResolver {
         }
         String loc = tidy(raw);
 
-        if (containerRoot == null) {
+        if (mounts.isEmpty()) {
             try {
                 Path p = Path.of(loc);
                 if (!p.isAbsolute()) {
@@ -82,26 +137,37 @@ public class ProjectPathResolver {
             }
         }
 
-        String rel;
-        if (hostRoot != null && isUnder(loc, hostRoot)) {
-            rel = remainder(loc, hostRoot);
-        } else if (isUnder(loc, containerRoot)) {
-            rel = remainder(loc, containerRoot);
-        } else if (isRelative(loc)) {
+        // the most specific mount that contains the typed path wins (E:/Projects before E:/)
+        Mount chosen = null;
+        String rel = null;
+        for (Mount m : mounts) {
+            String r = null;
+            if (isUnder(loc, m.host())) {
+                r = remainder(loc, m.host());
+            } else if (isUnder(loc, tidy(m.container().toString()))) {
+                r = remainder(loc, tidy(m.container().toString()));
+            }
+            if (r != null && (chosen == null || m.host().length() > chosen.host().length())) {
+                chosen = m;
+                rel = r;
+            }
+        }
+        if (chosen == null) {
+            if (!isRelative(loc)) {
+                throw outside();
+            }
+            chosen = mounts.get(0); // a relative location goes under the first mounted folder
             rel = loc;
-        } else {
-            throw outside();
         }
 
         try {
-            Path root = Path.of(containerRoot).normalize();
+            Path root = chosen.container();
             Path resolved = root.resolve(rel).normalize();
             if (!resolved.startsWith(root)) {
                 throw outside();
             }
             String relative = root.relativize(resolved).toString().replace('\\', '/');
-            String base = hostRoot != null ? hostRoot : containerRoot;
-            String stored = relative.isEmpty() ? base : base + "/" + relative;
+            String stored = relative.isEmpty() ? chosen.host() : join(chosen.host(), relative);
             return new Resolved(resolved, stored);
         } catch (InvalidPathException e) {
             throw new ApiException(ErrorCode.PROJECT_LOCATION_INVALID, "Location is not a valid path");
@@ -117,8 +183,10 @@ public class ProjectPathResolver {
 
     private ApiException outside() {
         return new ApiException(ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT,
-                "Location must be inside " + visibleRoot() + " - that is the only folder ORBIT can access. "
-                        + "To use another folder, set ORBIT_PROJECTS_DIR in .env and restart Docker.");
+                (mounts.size() == 1
+                        ? "Location must be inside " + visibleRoot() + " - that is the only folder ORBIT can access. "
+                        : "Location must be inside one of the folders ORBIT can access: " + String.join(", ", visibleRoots()) + ". ")
+                        + "To use another folder or drive, add it as ORBIT_MOUNT_n in .env and restart Docker.");
     }
 
     private static boolean isUnder(String loc, String root) {
@@ -126,6 +194,10 @@ public class ProjectPathResolver {
         String l = ci ? loc.toLowerCase() : loc;
         String r = ci ? root.toLowerCase() : root;
         return l.equals(r) || l.startsWith(r.endsWith("/") ? r : r + "/");
+    }
+
+    private static String join(String base, String name) {
+        return base.endsWith("/") ? base + name : base + "/" + name;
     }
 
     private static String remainder(String loc, String root) {

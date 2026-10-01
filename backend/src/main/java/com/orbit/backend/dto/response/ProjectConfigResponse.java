@@ -1,5 +1,10 @@
 package com.orbit.backend.dto.response;
 
-/** {@code root} is the folder (on the user's computer) that project locations must be inside; null = anywhere. */
-public record ProjectConfigResponse(String root) {
+import java.util.List;
+
+/**
+ * {@code roots} are the folders/drives (as on the user's computer) that project locations must be inside; empty =
+ * anywhere. {@code root} is the first of them (null when empty).
+ */
+public record ProjectConfigResponse(String root, List<String> roots) {
 }

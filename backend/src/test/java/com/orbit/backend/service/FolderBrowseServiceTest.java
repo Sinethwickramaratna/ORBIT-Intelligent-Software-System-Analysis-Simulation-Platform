@@ -99,4 +99,42 @@ class FolderBrowseServiceTest {
         assertThat(home.path()).isEqualTo(ProjectPathResolver.tidy(System.getProperty("user.home")));
         assertThat(home.shortcuts()).isNotEmpty();
     }
+
+    private static FolderBrowseService multi(Path e, Path d) {
+        return new FolderBrowseService(new ProjectPathResolver(
+                "E:/|" + e + ",D:/Work|" + d + ", |/mnt/host/3", null, null));
+    }
+
+    @Test
+    void severalMountsStartAtAListOfThemAndEachParentLeadsBackToIt(@TempDir Path e, @TempDir Path d) throws IOException {
+        Files.createDirectories(e.resolve("games/saves"));
+        Files.createDirectories(d.resolve("api"));
+        FolderBrowseService s = multi(e, d);
+
+        FolderBrowseResponse top = s.browse(null);
+        assertThat(top.path()).isEmpty();
+        assertThat(top.parent()).isNull();
+        assertThat(names(top)).containsExactly("E:/", "D:/Work");   // unused slot skipped
+
+        FolderBrowseResponse eRoot = s.browse("E:/");
+        assertThat(names(eRoot)).containsExactly("games");
+        assertThat(eRoot.parent()).isEmpty();                        // "" = back to the list
+        FolderBrowseResponse games = s.browse("E:/games");
+        assertThat(games.path()).isEqualTo("E:/games");
+        assertThat(games.parent()).isEqualTo("E:/");                 // not "E:"
+        assertThat(s.browse("E:/games/saves").parent()).isEqualTo("E:/games");
+        assertThat(names(s.browse("D:\\Work"))).containsExactly("api");
+        assertThat(s.browse("D:/Work/api").parent()).isEqualTo("D:/Work");
+    }
+
+    @Test
+    void severalMountsStillRefuseEverythingElse(@TempDir Path e, @TempDir Path d) {
+        FolderBrowseService s = multi(e, d);
+        rejected(() -> s.browse("F:/"), ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT);
+        rejected(() -> s.browse("D:/Other"), ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT);
+        rejected(() -> s.browse("E:/../x"), ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT);
+        rejected(() -> s.createFolder("", "x"), ErrorCode.PROJECT_LOCATION_INVALID);
+        assertThat(s.createFolder("D:/Work", "new")).isEqualTo("D:/Work/new");
+        assertThat(Files.isDirectory(d.resolve("new"))).isTrue();
+    }
 }

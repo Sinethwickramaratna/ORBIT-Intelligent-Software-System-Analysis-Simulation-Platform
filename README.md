@@ -60,12 +60,26 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
 
 The backend starts *without* a database (only `/api/setup/**` works; every other API answers `503 DATABASE_NOT_READY`) so the setup screen can run first.
 
-## Projects folder (Docker)
+## Which folders ORBIT can open (Docker)
 
-The backend runs in a container and cannot see your Windows/macOS folders. One host folder is mounted into it
-(`ORBIT_PROJECTS_DIR` in `.env`, default `./projects`, e.g. `ORBIT_PROJECTS_DIR=E:/Projects`) at `/projects`.
-A project **Location** must be inside that folder (`E:\Projects\MyApp` is used as `/projects/MyApp`); the path you typed is what is stored.
-After changing it run `docker compose up -d --build`. When the backend runs directly on your machine (Option B) any absolute path works.
+The backend runs in a container and cannot see your disks by itself, so you choose what it may open in `.env`
+(up to 8 entries, any OS, forward slashes):
+
+```
+ORBIT_MOUNT_1=E:/             # a whole drive (Windows)
+ORBIT_MOUNT_2=D:/Work         # or just a folder
+# macOS: ORBIT_MOUNT_1=/Users/you/code      Linux: ORBIT_MOUNT_1=/home/you/code
+```
+
+Then `docker compose up -d --build`. In **Create New Project** the folder button opens a chooser that starts at the list of
+these drives/folders; you can also type a path (`E:\Work\my-app` is translated to the matching mount). The path you
+see and the one stored in the database are always your real path. Notes:
+
+* ORBIT can read **and write** everything below a mounted entry - mount your project drives/folders, not a system drive.
+* Nothing listed = the `./projects` folder next to `docker-compose.yml`. `ORBIT_PROJECTS_DIR` from older versions still works as slot 1.
+* Docker Desktop (Windows/macOS) must be allowed to share the drive/folder (Settings → Resources → File sharing; automatic with WSL 2).
+  On Linux the folder must be writable by the container user.
+* Running the backend directly on your computer (Option B) needs no mounts: the chooser starts in your home folder and can reach every drive.
 
 ## Database persistence
 
@@ -91,7 +105,8 @@ Public: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refre
 Protected (`Authorization: Bearer <access token>`): `POST /api/auth/logout`, `GET /api/users`, `GET /api/users/me`,
 `GET|PUT|DELETE /api/users/{id}` (update/delete: own account only).
 Projects (own projects only): `GET|POST /api/projects`, `GET /api/projects/config`, `GET /api/projects/inspect?location=`,
-`GET /api/projects/{id}`, `GET /api/projects/{id}/tree?path=` (one folder level, lazily).
+`GET /api/projects/{id}`, `GET /api/projects/{id}/tree?path=` (one folder level, lazily),
+`GET /api/projects/browse?path=` and `POST /api/projects/browse/folder` (folder chooser: only the mounted folders in Docker).
 
 `POST /api/setup/environment` accepts `{secretKey?, dbUsername?, dbPassword?}` and only the values that are still
 missing; anything already configured is rejected with `409 ENVIRONMENT_ALREADY_CONFIGURED`.

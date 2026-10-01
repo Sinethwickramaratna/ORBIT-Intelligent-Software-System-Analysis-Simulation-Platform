@@ -17,7 +17,16 @@ public record OrbitProperties(String envFile, Cors cors, Jwt jwt, Database datab
      * (e.g. {@code E:/Projects}) and {@code containerRoot} is where it is mounted (e.g. {@code /projects}).
      * Both blank = the backend runs directly on the user's computer and paths are used as they are.
      */
-    public record Projects(String hostRoot, String containerRoot) {
+    public record Projects(String hostRoot, String containerRoot, String mounts) {
+
+        /**
+         * Several mounted folders, as {@code host|container} pairs separated by commas, e.g.
+         * {@code E:/|/mnt/host/1,D:/Work|/mnt/host/2}. Pairs with an empty host are unused slots and are skipped.
+         * When blank, the single {@code hostRoot}/{@code containerRoot} pair above is used.
+         */
+        public String mountsOrNull() {
+            return blank(mounts) ? null : mounts.trim();
+        }
 
         public String hostRootOrNull() {
             return blank(hostRoot) ? null : hostRoot.trim();

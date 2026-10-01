@@ -103,11 +103,11 @@ export default function FolderPicker({ initialPath, onSelect, onClose }: Props) 
 
         <div className="picker-body">
           <form className="picker-path" onSubmit={(e) => { e.preventDefault(); go(typed.trim() || undefined); }}>
-            <button type="button" className="tool-btn" title="Parent folder" aria-label="Parent folder" disabled={!view?.parent || loading} onClick={() => view?.parent && go(view.parent)}>
+            <button type="button" className="tool-btn" title="Parent folder" aria-label="Parent folder" disabled={view?.parent == null || loading} onClick={() => view?.parent != null && go(view.parent)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
             </button>
-            <input value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Folder path" spellCheck={false} />
-            <button type="button" className="tool-btn wide" onClick={() => setNaming(true)} disabled={!view || loading}>New Folder</button>
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Folder path" placeholder="Drives and folders ORBIT can open" spellCheck={false} />
+            <button type="button" className="tool-btn wide" onClick={() => setNaming(true)} disabled={!view || loading || view.path === ""}>New Folder</button>
           </form>
 
           {view && view.shortcuts.length > 0 && (
@@ -127,6 +127,7 @@ export default function FolderPicker({ initialPath, onSelect, onClose }: Props) 
               </form>
             )}
             {loading && <div className="tree-note">Loading…</div>}
+            {!loading && view && view.path === "" && view.folders.length > 0 && <div className="tree-note">Choose a drive or folder (double-click to open).</div>}
             {!loading && view && view.folders.length === 0 && !naming && <div className="tree-note">No sub-folders here.</div>}
             {!loading &&
               view?.folders.map((f) => (

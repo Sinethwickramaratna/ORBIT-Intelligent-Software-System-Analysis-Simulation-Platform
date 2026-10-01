@@ -37,6 +37,8 @@ orbit:
     # Docker only: the host folder that is mounted into the container, as the user writes it (E:/Projects), and its
     # mount point inside the container. Leave both empty when the backend runs directly on the user's computer.
     host-root: ${ORBIT_PROJECTS_HOST_ROOT:}
+    # Docker with several drives/folders: "host|container,host|container" (see docker-compose.yml / ORBIT_MOUNT_n)
+    mounts: ${ORBIT_PROJECTS_MOUNTS:}
     container-root: ${ORBIT_PROJECTS_CONTAINER_ROOT:}
   jwt:
     # Created by the user in the first-run setup screen and stored as JWT_SECRET in .env

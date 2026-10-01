@@ -33,16 +33,20 @@ public class FolderBrowseService {
     private final ProjectPathResolver resolver;
 
     public FolderBrowseResponse browse(String rawPath) {
-        String root = resolver.visibleRoot();
+        boolean confined = resolver.confined();
+        boolean blank = rawPath == null || rawPath.isBlank();
+        if (confined && blank && resolver.mounts().size() > 1) {
+            return mountedFolders(); // "This PC": the drives/folders that were mounted
+        }
         ProjectPathResolver.Resolved at;
-        if (rawPath == null || rawPath.isBlank()) {
-            at = resolver.resolve(root != null ? root : ProjectPathResolver.tidy(System.getProperty("user.home")));
+        if (blank) {
+            at = resolver.resolve(confined ? resolver.visibleRoot() : ProjectPathResolver.tidy(System.getProperty("user.home")));
         } else {
             at = resolver.resolve(rawPath);
         }
         Path dir = at.path();
         requireDirectory(dir);
-        if (root != null) {
+        if (confined) {
             requireInsideRealRoot(dir);
         }
 
@@ -54,7 +58,7 @@ public class FolderBrowseService {
                 if (name.startsWith(".") || !Files.isDirectory(child)) {
                     continue;
                 }
-                if (root != null && Files.isSymbolicLink(child)) {
+                if (confined && Files.isSymbolicLink(child)) {
                     continue; // could point outside the mounted root
                 }
                 if (folders.size() >= MAX_FOLDERS) {
@@ -68,7 +72,14 @@ public class FolderBrowseService {
         }
         folders.sort(Comparator.comparing(f -> f.name().toLowerCase()));
 
-        return new FolderBrowseResponse(at.location(), parentOf(at, root), folders, shortcuts(root), truncated);
+        return new FolderBrowseResponse(at.location(), parentOf(at), folders, shortcuts(), truncated);
+    }
+
+    private FolderBrowseResponse mountedFolders() {
+        List<Folder> roots = resolver.mounts().stream()
+                .map(m -> new Folder(m.display(), m.display()))
+                .toList();
+        return new FolderBrowseResponse("", null, roots, List.of(), false);
     }
 
     /** Creates {@code name} inside {@code parent}; returns the new folder's location. */
@@ -80,7 +91,7 @@ public class FolderBrowseService {
         }
         ProjectPathResolver.Resolved at = resolver.resolve(parent);
         requireDirectory(at.path());
-        if (resolver.visibleRoot() != null) {
+        if (resolver.confined()) {
             requireInsideRealRoot(at.path());
         }
         Path target = at.path().resolve(n);
@@ -94,10 +105,13 @@ public class FolderBrowseService {
         return join(at.location(), n);
     }
 
-    private List<Folder> shortcuts(String root) {
+    private List<Folder> shortcuts() {
         List<Folder> list = new ArrayList<>();
-        if (root != null) {
-            list.add(new Folder("Projects", root));
+        if (resolver.confined()) {
+            if (resolver.mounts().size() > 1) {
+                return list; // the top level already lists them
+            }
+            list.add(new Folder("Projects", resolver.visibleRoot()));
             return list;
         }
         String home = System.getProperty("user.home");
@@ -114,9 +128,13 @@ public class FolderBrowseService {
         return list;
     }
 
-    private static String parentOf(ProjectPathResolver.Resolved at, String root) {
-        if (root != null) {
-            return ProjectPathResolver.sameLocation(at.location(), root) ? null : up(at.location());
+    private String parentOf(ProjectPathResolver.Resolved at) {
+        if (resolver.confined()) {
+            ProjectPathResolver.Mount m = resolver.mountOf(at.path());
+            if (m != null && ProjectPathResolver.sameLocation(at.location(), m.host())) {
+                return resolver.mounts().size() > 1 ? "" : null; // "" = the list of mounted folders
+            }
+            return up(at.location());
         }
         Path parent = at.path().getParent();
         return parent == null ? null : ProjectPathResolver.tidy(parent.toString());
@@ -124,7 +142,14 @@ public class FolderBrowseService {
 
     private static String up(String location) {
         int i = location.lastIndexOf('/');
-        return i <= 0 ? null : location.substring(0, i);
+        if (i < 0) {
+            return null;
+        }
+        String parent = location.substring(0, i);
+        if (parent.isEmpty()) {
+            return "/";                       // child of the Unix root
+        }
+        return parent.matches("^[A-Za-z]:$") ? parent + "/" : parent; // child of a drive root
     }
 
     private static String join(String base, String name) {
@@ -140,16 +165,16 @@ public class FolderBrowseService {
     /** Symlinks inside the mount must not lead the chooser outside it. */
     private void requireInsideRealRoot(Path dir) {
         try {
-            Path rootReal = rootPath().toRealPath();
+            ProjectPathResolver.Mount m = resolver.mountOf(dir);
+            if (m == null) {
+                throw new ApiException(ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT, "That folder is outside the folders ORBIT can access");
+            }
+            Path rootReal = m.container().toRealPath();
             if (!dir.toRealPath().startsWith(rootReal)) {
                 throw new ApiException(ErrorCode.PROJECT_LOCATION_OUTSIDE_ROOT, "That folder is outside the projects folder");
             }
         } catch (IOException e) {
             throw new ApiException(ErrorCode.PROJECT_FOLDER_UNAVAILABLE, "That folder cannot be read");
         }
-    }
-
-    private Path rootPath() {
-        return resolver.containerRootPath();
     }
 }

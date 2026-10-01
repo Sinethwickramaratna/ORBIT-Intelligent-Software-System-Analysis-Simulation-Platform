@@ -17,7 +17,8 @@ export default function ProjectDialog({ onClose, onCreated }: Props) {
   const [type, setType] = useState<ProjectType>("WEB_APPLICATION");
   const [description, setDescription] = useState("");
   const [initGit, setInitGit] = useState(true);
-  const [root, setRoot] = useState<string | null>(null);
+  const [roots, setRoots] = useState<string[]>([]);
+  const root = roots[0] ?? null;
   const [inspection, setInspection] = useState<LocationInspection | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -27,7 +28,7 @@ export default function ProjectDialog({ onClose, onCreated }: Props) {
 
   useEffect(() => {
     nameRef.current?.focus();
-    api.projectConfig().then((c) => setRoot(c.root)).catch(() => {});
+    api.projectConfig().then((c) => setRoots(c.roots ?? (c.root ? [c.root] : []))).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -116,7 +117,7 @@ export default function ProjectDialog({ onClose, onCreated }: Props) {
                   id={`${uid}-loc`}
                   value={location}
                   maxLength={1024}
-                  placeholder={root ? `${root}/MyProject` : "Folder of the project"}
+                  placeholder={root ? `${root.replace(/\/$/, "")}/MyProject` : "Folder of the project"}
                   onChange={(e) => setLocation(e.target.value)}
                 />
                 <button type="button" className="folder-btn" onClick={() => setPicking(true)} aria-label="Browse for a folder" title="Browse…">
@@ -129,7 +130,7 @@ export default function ProjectDialog({ onClose, onCreated }: Props) {
               {!errors.location && locationProblem && <span className="field-error">{locationProblem}</span>}
               {!errors.location && !locationProblem && (
                 <span className="hint">
-                  {root ? `Must be inside ${root}. ` : ""}
+                  {roots.length === 1 ? `Must be inside ${roots[0]}. ` : roots.length > 1 ? `Must be inside ${roots.join(", ")}. ` : ""}
                   {inspection?.valid ? inspection.message : "A missing folder is created."}
                 </span>
               )}
