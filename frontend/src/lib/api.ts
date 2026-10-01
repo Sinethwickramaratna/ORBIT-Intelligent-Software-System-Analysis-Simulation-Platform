@@ -36,6 +36,8 @@ export interface FolderSettings {
   /** The host helper is running: saving re-creates the containers by itself. */
   autoApply: boolean;
   applying: boolean;
+  /** Why automatic apply is or is not possible. NO_SIGNAL_FOLDER: containers older than the helper. */
+  helper: "RUNNING" | "NOT_RUNNING" | "NO_SIGNAL_FOLDER";
 }
 
 export interface User {
@@ -242,12 +244,13 @@ export const api = {
   },
 
   getFolderSettings: () => authed<FolderSettings>("/api/settings/folders"),
-  applyFolderSettings: () => authed<FolderSettings>("/api/settings/folders/apply", { method: "POST" }),
   saveFolderSettings: (folders: string[]) =>
     authed<FolderSettings>("/api/settings/folders", { method: "PUT", body: JSON.stringify({ folders }) }),
   listProjects: () => authed<Project[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     authed<Project>("/api/projects", { method: "POST", body: JSON.stringify(input) }),
+  deleteProject: (projectId: string, confirmName: string) =>
+    authed<void>(`/api/projects/${projectId}?confirmName=${encodeURIComponent(confirmName)}`, { method: "DELETE" }),
   projectConfig: () => authed<{ root: string | null; roots: string[] }>("/api/projects/config"),
   inspectLocation: (location: string) =>
     authed<LocationInspection>(`/api/projects/inspect?location=${encodeURIComponent(location)}`),

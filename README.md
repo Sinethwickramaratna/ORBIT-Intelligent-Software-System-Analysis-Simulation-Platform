@@ -93,9 +93,14 @@ press **Save**, ORBIT leaves a request file in `.orbit-signal/`, the helper runs
 restarts for about a minute - nothing else to do, your database and projects are kept. Its log is
 `.orbit-signal/apply.log`.
 
-If the helper is not running (you started with plain `docker compose up`, closed its window, or rebooted), ORBIT
-tells you so after **Save** - then run **`start.cmd`** (Windows) or **`./start.sh`** once (or `docker compose up -d`).
-Stop the helper on Linux/macOS with `./scripts/orbit-watch.sh stop`.
+`start.cmd` / `./start.sh` also ask once whether the helper should **start automatically when you sign in** (default
+yes), so it keeps working after a reboot. It uses the Startup folder on Windows, a LaunchAgent on macOS and a systemd
+user service (or desktop autostart entry) on Linux. Change your mind any time: `scripts\orbit-watch.cmd uninstall` /
+`install` (Windows) or `./scripts/orbit-watch.sh uninstall` / `install`; `stop` stops it.
+
+If ORBIT cannot apply a change by itself it tells you why after **Save**: either the helper is not running (run
+`start.cmd` / `./start.sh` - that applies the change), or your containers were created before this feature existed
+(run `start.cmd` / `./start.sh` once to update them - this is only needed one time).
 
 The values are stored in `.env` as `ORBIT_MOUNT_1` ... `ORBIT_MOUNT_8` (plus `ORBIT_MOUNTS_CONFIGURED=true`); you can still
 edit that file by hand:

@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -100,6 +101,21 @@ public class ProjectService {
 
     public ProjectResponse get(UUID userId, UUID projectId) {
         return describe(find(userId, projectId));
+    }
+
+    /**
+     * Removes the project from ORBIT. The caller must repeat the exact project name, so a stray request cannot delete
+     * anything. Only the database row goes away: the folder and its files on the user's computer are left untouched.
+     */
+    @Transactional
+    public void delete(UUID userId, UUID projectId, String confirmName) {
+        Project project = find(userId, projectId);
+        if (confirmName == null || !confirmName.equals(project.getProjectName())) {
+            throw new ApiException(ErrorCode.PROJECT_NAME_MISMATCH);
+        }
+        projectRepository.delete(project);
+        log.info("User {} removed project '{}' ({}) from ORBIT; its folder {} was not touched", userId,
+                project.getProjectName(), projectId, project.getLocation());
     }
 
     public ProjectTreeResponse tree(UUID userId, UUID projectId, String relativePath) {

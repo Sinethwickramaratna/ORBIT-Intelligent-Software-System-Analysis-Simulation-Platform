@@ -6,6 +6,8 @@ import SettingsDialog from "./SettingsDialog";
 import ApplyFallback from "./ApplyFallback";
 import { useFolderApply } from "@/lib/useFolderApply";
 import ProjectDialog from "./ProjectDialog";
+import ProjectMenu from "./ProjectMenu";
+import DeleteProjectDialog from "./DeleteProjectDialog";
 import FileTree from "./FileTree";
 
 /**
@@ -90,6 +92,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<Project | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [folderSettings, setFolderSettings] = useState<FolderSettings | null>(null);
   const applyGaveUp = useFolderApply(folderSettings, setFolderSettings);
@@ -107,6 +110,12 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
   const visible = q
     ? projects.filter((p) => p.projectName.toLowerCase().includes(q) || p.location.toLowerCase().includes(q))
     : projects;
+
+  function onDeleted(projectId: string) {
+    setProjects((list) => list.filter((p) => p.projectId !== projectId));
+    setActiveId((id) => (id === projectId ? null : id));
+    setDeleting(null);
+  }
 
   function onCreated(project: Project) {
     setProjects((list) => [project, ...list.filter((p) => p.projectId !== project.projectId)]);
@@ -191,7 +200,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
               Applying your folder changes - ORBIT restarts for a moment and this message disappears when it is done.
             </span>
           ) : (
-            <ApplyFallback onSettings={setFolderSettings} />
+            <ApplyFallback helper={folderSettings.helper} gaveUp={applyGaveUp} />
           )}
           <button type="button" className="btn ghost" onClick={() => setSettingsOpen(true)}>Settings</button>
         </div>
@@ -216,7 +225,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
             {projects.length > 0 && <div className="section-label">Recent</div>}
             <ul className="project-list">
               {visible.map((p) => (
-                <li key={p.projectId}>
+                <li key={p.projectId} className="project-item">
                   <button
                     type="button"
                     className={`project-card${p.projectId === activeId ? " active" : ""}`}
@@ -232,10 +241,8 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
                       <strong>{p.projectName}</strong>
                       <span>{p.location}</span>
                     </span>
-                    <span className="project-chevron">
-                      <ChevronIcon />
-                    </span>
                   </button>
+                  <ProjectMenu projectName={p.projectName} tabIndex={tab} onDelete={() => setDeleting(p)} />
                 </li>
               ))}
             </ul>
@@ -315,6 +322,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
       </div>
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onSaved={setFolderSettings} />}
+      {deleting && <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} onDeleted={onDeleted} />}
       {creating && <ProjectDialog onClose={() => setCreating(false)} onCreated={onCreated} />}
 
       <footer className="statusbar">

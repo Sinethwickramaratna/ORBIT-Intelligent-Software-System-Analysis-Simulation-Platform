@@ -26,7 +26,18 @@ docker compose up -d --build || exit 1
 
 # Small helper that applies folder changes made in ORBIT's Settings (re-creates the containers for you).
 # Stop it with: ./scripts/orbit-watch.sh stop
+mkdir -p .orbit-signal
 nohup sh scripts/orbit-watch.sh >/dev/null 2>&1 &
+
+# Offer (once) to start that helper automatically at sign-in, so it also runs after a reboot.
+if ! sh scripts/orbit-watch.sh installed && [ ! -f .orbit-signal/no-autostart ] && [ -t 0 ]; then
+  printf "Start the ORBIT helper automatically when you sign in? [Y/n] "
+  read -r answer
+  case "$answer" in
+    n|N|no|NO) touch .orbit-signal/no-autostart ;;
+    *) sh scripts/orbit-watch.sh install ;;
+  esac
+fi
 
 echo
 echo "ORBIT is starting - open http://localhost:3000"

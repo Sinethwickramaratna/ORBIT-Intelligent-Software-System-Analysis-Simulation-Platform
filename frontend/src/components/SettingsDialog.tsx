@@ -86,7 +86,7 @@ export default function SettingsDialog({ onClose, onSaved }: Props) {
               )}
               {saved?.restartRequired && (!saved.autoApply || gaveUp) && (
                 <div className="notice" role="status">
-                  <ApplyFallback onSettings={(s) => { setSaved(s); onSaved(s); }} />
+                  <ApplyFallback helper={saved.helper} gaveUp={gaveUp} />
                 </div>
               )}
               {saved && !saved.restartRequired && (

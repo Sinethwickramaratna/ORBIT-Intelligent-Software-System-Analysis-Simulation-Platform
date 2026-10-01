@@ -107,6 +107,18 @@ public class FolderSettingsService {
         }
     }
 
+    /**
+     * Why automatic apply is (not) possible: {@code RUNNING}; {@code NOT_RUNNING} (the helper on the user's computer
+     * is stopped); or {@code NO_SIGNAL_FOLDER} (these containers were created before the helper existed, so a
+     * one-time start.cmd / start.sh is needed to update them).
+     */
+    public String helperState() {
+        if (signalDir == null || signalDir.isBlank() || !Files.isDirectory(Path.of(signalDir))) {
+            return "NO_SIGNAL_FOLDER";
+        }
+        return autoApplyAvailable() ? "RUNNING" : "NOT_RUNNING";
+    }
+
     /** True while a request to re-create the containers is waiting for (or being run by) the host helper. */
     public boolean applying() {
         Path request = signalFile(APPLY_FILE);

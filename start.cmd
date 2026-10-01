@@ -27,7 +27,21 @@ docker compose up -d --build
 if errorlevel 1 exit /b 1
 
 rem Small helper (minimized window) that applies folder changes made in ORBIT's Settings by re-creating the containers.
+if not exist ".orbit-signal" mkdir ".orbit-signal"
+rem End any older helper first (it may be stuck), then start a fresh one.
+call scripts\orbit-watch.cmd stop >nul 2>&1
 start "ORBIT helper" /min cmd /c "scripts\orbit-watch.cmd"
+
+rem Offer (once) to start that helper automatically when you sign in, so it also runs after a reboot.
+call scripts\orbit-watch.cmd installed
+if errorlevel 1 if not exist ".orbit-signal\no-autostart" (
+  choice /c YN /t 15 /d Y /n /m "Start the ORBIT helper automatically when you sign in to Windows? [Y/n] "
+  if errorlevel 2 (
+    echo.>".orbit-signal\no-autostart"
+  ) else (
+    call scripts\orbit-watch.cmd install
+  )
+)
 
 echo.
 echo ORBIT is starting - open http://localhost:3000

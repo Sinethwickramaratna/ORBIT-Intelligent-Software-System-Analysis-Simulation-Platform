@@ -169,4 +169,20 @@ class FolderSettingsServiceTest {
         assertThat(s.autoApplyAvailable()).isFalse(); // helper window was closed long ago
         assertThat(s.requestApply()).isFalse();
     }
+
+    @Test
+    void helperStateExplainsWhyAutoApplyIsNotPossible(@TempDir Path dir) throws IOException {
+        FolderSettingsService s = service(dir.resolve(".env"), docker("E:/"));
+        assertThat(s.helperState()).isEqualTo("NO_SIGNAL_FOLDER"); // containers older than the helper
+
+        s.setSignalDir(dir.resolve("missing").toString());
+        assertThat(s.helperState()).isEqualTo("NO_SIGNAL_FOLDER");
+
+        Path signal = Files.createDirectory(dir.resolve("signal"));
+        s.setSignalDir(signal.toString());
+        assertThat(s.helperState()).isEqualTo("NOT_RUNNING");
+
+        Files.writeString(signal.resolve("watcher"), "now");
+        assertThat(s.helperState()).isEqualTo("RUNNING");
+    }
 }

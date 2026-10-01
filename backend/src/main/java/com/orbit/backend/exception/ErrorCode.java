@@ -27,6 +27,7 @@ public enum ErrorCode {
     INVALID_SETTING(HttpStatus.BAD_REQUEST, "Invalid setting value"),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "You are not allowed to do that"),
     PROJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "Project not found"),
+    PROJECT_NAME_MISMATCH(HttpStatus.BAD_REQUEST, "The typed name does not match the project name"),
     PROJECT_ALREADY_EXISTS(HttpStatus.CONFLICT, "You already have a project at that location"),
     PROJECT_LOCATION_INVALID(HttpStatus.BAD_REQUEST, "The project location is not valid"),
     PROJECT_LOCATION_OUTSIDE_ROOT(HttpStatus.BAD_REQUEST, "The project location is outside the folder ORBIT can access"),
