@@ -242,6 +242,7 @@ export const api = {
   },
 
   getFolderSettings: () => authed<FolderSettings>("/api/settings/folders"),
+  applyFolderSettings: () => authed<FolderSettings>("/api/settings/folders/apply", { method: "POST" }),
   saveFolderSettings: (folders: string[]) =>
     authed<FolderSettings>("/api/settings/folders", { method: "PUT", body: JSON.stringify({ folders }) }),
   listProjects: () => authed<Project[]>("/api/projects"),

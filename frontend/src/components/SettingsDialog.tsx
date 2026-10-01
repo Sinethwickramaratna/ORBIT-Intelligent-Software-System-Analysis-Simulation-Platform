@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type FolderSettings } from "@/lib/api";
 import { useFolderApply } from "@/lib/useFolderApply";
+import ApplyFallback from "./ApplyFallback";
 import FoldersEditor, { validateFolders } from "./FoldersEditor";
 
 interface Props {
@@ -85,8 +86,7 @@ export default function SettingsDialog({ onClose, onSaved }: Props) {
               )}
               {saved?.restartRequired && (!saved.autoApply || gaveUp) && (
                 <div className="notice" role="status">
-                  Saved. To apply it, run <code>start.cmd</code> (Windows) or <code>./start.sh</code> once, or
-                  <code> docker compose up -d</code>. Your data is kept.
+                  <ApplyFallback onSettings={(s) => { setSaved(s); onSaved(s); }} />
                 </div>
               )}
               {saved && !saved.restartRequired && (

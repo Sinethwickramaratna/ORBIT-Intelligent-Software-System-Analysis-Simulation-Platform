@@ -13,12 +13,16 @@ rem Only one helper at a time: the second one cannot open the locked file and st
 exit /b 0
 
 :loop
-echo %date% %time%> ".orbit-signal\watcher"
+>".orbit-signal\watcher" echo %date% %time%
 if exist ".orbit-signal\apply" (
   del /q ".orbit-signal\apply" >nul 2>&1
-  echo === %date% %time% docker compose up -d>> ".orbit-signal\apply.log"
+  >>".orbit-signal\apply.log" echo === %date% %time% docker compose up -d
   docker compose up -d >> ".orbit-signal\apply.log" 2>&1
-  echo exit code: %errorlevel%>> ".orbit-signal\apply.log"
+  call :logexit
 )
 ping -n 4 127.0.0.1 >nul
 goto loop
+
+:logexit
+>>".orbit-signal\apply.log" echo exit code: %errorlevel%
+exit /b 0

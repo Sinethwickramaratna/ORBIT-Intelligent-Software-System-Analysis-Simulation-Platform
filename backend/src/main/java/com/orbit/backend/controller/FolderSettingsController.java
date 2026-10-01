@@ -7,6 +7,7 @@ import com.orbit.backend.exception.ErrorCode;
 import com.orbit.backend.service.FolderSettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,6 +34,15 @@ public class FolderSettingsController {
         }
         service.save(request.folders());
         if (service.restartRequired()) {
+            service.requestApply();
+        }
+        return response();
+    }
+
+    /** "Apply now": asks the host helper again (e.g. after the user started it). */
+    @PostMapping("/apply")
+    public FolderSettingsResponse apply() {
+        if (service.editable() && service.restartRequired()) {
             service.requestApply();
         }
         return response();

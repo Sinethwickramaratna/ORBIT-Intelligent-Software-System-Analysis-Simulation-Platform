@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type FolderSettings, type Project, type User } from "@/lib/api";
 import SettingsDialog from "./SettingsDialog";
+import ApplyFallback from "./ApplyFallback";
 import { useFolderApply } from "@/lib/useFolderApply";
 import ProjectDialog from "./ProjectDialog";
 import FileTree from "./FileTree";
@@ -190,13 +191,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
               Applying your folder changes - ORBIT restarts for a moment and this message disappears when it is done.
             </span>
           ) : (
-            <span>
-              {folderSettings.autoApply
-                ? "The folder change was not applied automatically. "
-                : "Folder access was changed. "}
-              Run <code>start.cmd</code> (Windows) or <code>./start.sh</code> once (or <code>docker compose up -d</code>)
-              to apply it. Until then ORBIT can only open: <strong>{folderSettings.active.join(", ")}</strong>
-            </span>
+            <ApplyFallback onSettings={setFolderSettings} />
           )}
           <button type="button" className="btn ghost" onClick={() => setSettingsOpen(true)}>Settings</button>
         </div>
