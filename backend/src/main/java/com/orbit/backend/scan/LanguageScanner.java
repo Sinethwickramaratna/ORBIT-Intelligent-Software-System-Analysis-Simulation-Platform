@@ -35,8 +35,12 @@ public final class LanguageScanner {
     public record Result(Map<String, Stat> byLanguage, int skippedFiles) {
     }
 
-    /** Languages whose comments start with {@code #}; every other language is treated as C-like. */
-    private static final Set<String> HASH_COMMENT_LANGUAGES = Set.of("python");
+    /** Comment and string rules of the languages that are not C-like; every other language is treated as C-like. */
+    private static final Map<String, LineCounter.Style> STYLE_BY_LANGUAGE = Map.of(
+            "python", LineCounter.Style.HASH,
+            "sql", LineCounter.Style.SQL,
+            "c#", LineCounter.Style.C_SHARP,
+            "dart", LineCounter.Style.DART);
 
     private final Map<String, String> languageByExtension;
     private final Set<String> ignoredFolders;
@@ -113,8 +117,7 @@ public final class LanguageScanner {
     }
 
     private static int countLines(Path file, String language) throws IOException {
-        LineCounter.Style style = HASH_COMMENT_LANGUAGES.contains(language.toLowerCase(Locale.ROOT))
-                ? LineCounter.Style.HASH : LineCounter.Style.C_LIKE;
+        LineCounter.Style style = STYLE_BY_LANGUAGE.getOrDefault(language.toLowerCase(Locale.ROOT), LineCounter.Style.C_LIKE);
         // InputStreamReader replaces malformed input instead of throwing, so odd encodings still count
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(Files.newInputStream(file), StandardCharsets.UTF_8))) {
