@@ -1,6 +1,6 @@
 
 /* ---------- workbench home (post-login) — Visual Studio / VS Code inspired ---------- */
-.workbench { --radius: 4px; --sidebar-w: 300px; height: 100vh; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+.workbench { --radius: 4px; --sidebar-w: 300px; --slide-dur: .42s; --slide-ease: cubic-bezier(.22, 1, .36, 1); height: 100vh; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
 
 /* title / menu bar */
 .menubar {
@@ -25,9 +25,12 @@
   position: absolute; z-index: 5; top: 12px; left: calc(var(--sidebar-w) - 12px);
   width: 24px; height: 24px; display: grid; place-items: center; cursor: pointer; padding: 0;
   color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 50%;
-  transition: left .2s ease, color .12s, border-color .12s, background .12s;
+  box-shadow: 0 1px 4px rgba(0,0,0,.18);
+  transition: left var(--slide-dur) var(--slide-ease), color .12s, border-color .12s, background .12s, box-shadow .2s ease, transform .15s ease;
 }
-.sidebar-toggle svg { transition: transform .2s ease; transform: rotate(180deg); }
+.sidebar-toggle svg { transition: transform var(--slide-dur) var(--slide-ease); transform: rotate(180deg); }
+.sidebar-toggle:hover { transform: scale(1.1); box-shadow: 0 2px 8px rgba(0,0,0,.28); }
+.sidebar-toggle:active { transform: scale(.94); }
 .sidebar-toggle[aria-expanded="false"] { left: 8px; }
 .sidebar-toggle[aria-expanded="false"] svg { transform: none; }
 .sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--surface-2); }
@@ -35,17 +38,22 @@
 /* ---------- body / sidebar (collapsible) ---------- */
 .workbench-body {
   position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: var(--sidebar-w) 1fr;
-  transition: grid-template-columns .2s ease;
+  transition: grid-template-columns var(--slide-dur) var(--slide-ease);
 }
 .workbench-body.sidebar-hidden { grid-template-columns: 0px 1fr; }
 
 .sidebar {
   min-width: 0; min-height: 0; overflow: hidden;
   background: var(--surface); border-right: 1px solid var(--border);
-  transition: border-color .2s ease, visibility 0s linear 0s;
+  transition: border-color var(--slide-dur) var(--slide-ease), box-shadow var(--slide-dur) var(--slide-ease), visibility 0s linear 0s;
 }
-.sidebar.collapsed { border-right-color: transparent; visibility: hidden; transition: border-color .2s ease, visibility 0s linear .2s; }
-.sidebar-inner { width: var(--sidebar-w); height: 100%; display: flex; flex-direction: column; }
+.sidebar.collapsed { border-right-color: transparent; visibility: hidden; transition: border-color var(--slide-dur) var(--slide-ease), visibility 0s linear var(--slide-dur); }
+/* content glides and fades with the panel instead of being clipped */
+.sidebar-inner {
+  width: var(--sidebar-w); height: 100%; display: flex; flex-direction: column; will-change: transform, opacity;
+  transition: transform var(--slide-dur) var(--slide-ease), opacity calc(var(--slide-dur) * .7) ease .05s;
+}
+.sidebar.collapsed .sidebar-inner { transform: translateX(-32px); opacity: 0; transition: transform var(--slide-dur) var(--slide-ease), opacity calc(var(--slide-dur) * .5) ease; }
 
 /* Explorer-style header */
 .sidebar-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px 20px; }
@@ -163,7 +171,8 @@
   .workbench-body, .workbench-body.sidebar-hidden { grid-template-columns: 1fr; grid-template-rows: auto 1fr; transition: none; }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
   .sidebar.collapsed { display: none; }
-  .sidebar-inner { width: 100%; }
+  .sidebar-inner { width: 100%; transition: none; }
+  .sidebar.collapsed .sidebar-inner { transform: none; opacity: 1; }
   .project-list { max-height: 200px; }
   .status-item:last-child { display: none; }
   .sidebar-toggle, .sidebar-toggle[aria-expanded="false"] { left: auto; right: 10px; top: 10px; transition: none; }
@@ -172,7 +181,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workbench-body, .sidebar, .sidebar-toggle, .sidebar-toggle svg { transition: none !important; }
+  .workbench-body, .sidebar, .sidebar-inner, .sidebar-toggle, .sidebar-toggle svg, .project-tab { transition: none !important; }
 }
 
 /* ---------- open project: empty middle + file explorer on the right ---------- */
@@ -184,7 +193,7 @@
   height: 34px; display: inline-flex; align-items: center; gap: 8px; padding: 0 8px 0 14px; font-size: 13px;
   background: var(--surface); border: 1px solid var(--border); border-top: 0; border-left: 0; border-bottom-color: var(--accent);
 }
-.project-tab { transition: margin-left .2s ease; }
+.project-tab { transition: margin-left var(--slide-dur) var(--slide-ease); }
 /* Sidebar hidden: the show button floats at the top-left, so move the project tab clear of it */
 @media (min-width: 761px) {
   .workbench-body.sidebar-hidden .project-tab { margin-left: 40px; border-left: 1px solid var(--border); }
@@ -195,7 +204,7 @@
 .explorer { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); }
 .explorer-head { padding: 12px 14px 8px 16px; }
 .explorer-root { padding: 4px 16px 6px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 12px; font-size: 13px; scrollbar-width: thin; }
+.tree { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 12px; font-size: 13px; }
 .tree-row { display: flex; align-items: center; gap: 4px; height: 24px; padding-right: 10px; cursor: pointer; color: var(--text); white-space: nowrap; }
 .tree-row:hover { background: var(--surface-2); }
 .tree-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -299,7 +308,7 @@
 .picker-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
 .chip:hover { color: var(--accent); border-color: var(--accent); }
-.picker-list { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px 0; scrollbar-width: thin; }
+.picker-list { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px 0; }
 .picker-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; font-size: 13px; cursor: default; user-select: none; color: var(--text); }
 .picker-row svg { flex: none; color: var(--accent); }
 .picker-row:hover { background: var(--surface-2); }
@@ -439,7 +448,7 @@
 .analysis { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .analysis-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px 16px; }
 .analysis-status { font-size: 11px; color: var(--muted); }
-.analysis-body { flex: 1; min-height: 0; overflow: auto; padding: 0 14px 12px 16px; font-size: 12px; scrollbar-width: thin; }
+.analysis-body { flex: 1; min-height: 0; overflow: auto; padding: 0 14px 12px 16px; font-size: 12px; }
 .analysis-empty { margin: 4px 0; color: var(--muted); line-height: 1.5; }
 .analysis-error { margin: 4px 0 8px; color: var(--danger); line-height: 1.4; }
 .analysis-summary { margin: 0 0 10px; display: grid; gap: 3px; }
