@@ -30,6 +30,7 @@
         <java.version>17</java.version>
         <jjwt.version>0.12.6</jjwt.version>
         <bouncycastle.version>1.78.1</bouncycastle.version>
+        <jgit.version>7.3.0.202506031305-r</jgit.version>
     </properties>
     <dependencies>
         <dependency>
@@ -62,6 +63,13 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
             <scope>runtime</scope>
+        </dependency>
+
+        <!-- Git clone / ls-remote without needing the git program (the backend container has none) -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>${jgit.version}</version>
         </dependency>
 
         <!-- Bean Validation for request DTOs -->

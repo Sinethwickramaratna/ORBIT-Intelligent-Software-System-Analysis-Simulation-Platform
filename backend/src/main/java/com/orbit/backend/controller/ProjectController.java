@@ -1,5 +1,7 @@
 package com.orbit.backend.controller;
 
+import com.orbit.backend.dto.request.CloneInspectRequest;
+import com.orbit.backend.dto.request.CloneProjectRequest;
 import com.orbit.backend.dto.request.CreateFolderRequest;
 import com.orbit.backend.dto.request.CreateProjectRequest;
 import com.orbit.backend.dto.response.FolderBrowseResponse;
@@ -8,6 +10,7 @@ import com.orbit.backend.dto.response.ProjectConfigResponse;
 import com.orbit.backend.dto.response.ProjectInspectResponse;
 import com.orbit.backend.dto.response.ProjectResponse;
 import com.orbit.backend.dto.response.ProjectTreeResponse;
+import com.orbit.backend.dto.response.RepositoryInspectResponse;
 import com.orbit.backend.entity.AuthenticatedUser;
 import com.orbit.backend.service.ProjectService;
 import jakarta.validation.Valid;
@@ -46,6 +49,20 @@ public class ProjectController {
     public ProjectResponse create(@Valid @RequestBody CreateProjectRequest request,
                                   @AuthenticationPrincipal AuthenticatedUser principal) {
         return projectService.create(principal.userId(), request);
+    }
+
+    /** "Check Repository" of the Clone window: owner, default branch, branches, visibility of a public repository. */
+    @PostMapping("/clone/inspect")
+    public RepositoryInspectResponse inspectRepository(@Valid @RequestBody CloneInspectRequest request) {
+        return projectService.inspectRepository(request.repositoryUrl());
+    }
+
+    /** Clones the repository and registers it as a project. Returns once the clone is complete. */
+    @PostMapping("/clone")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ProjectResponse cloneRepository(@Valid @RequestBody CloneProjectRequest request,
+                                           @AuthenticationPrincipal AuthenticatedUser principal) {
+        return projectService.cloneProject(principal.userId(), request);
     }
 
     /** Which folder project locations must be inside (null = anywhere). */

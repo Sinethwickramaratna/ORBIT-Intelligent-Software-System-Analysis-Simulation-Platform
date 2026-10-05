@@ -83,6 +83,27 @@ export interface CreateProjectInput {
   initGit: boolean;
 }
 
+export interface RepositoryInfo {
+  found: boolean;
+  message: string | null;
+  repository: string | null;
+  owner: string | null;
+  defaultBranch: string | null;
+  branchCount: number;
+  visibility: string | null;
+  branches: string[];
+}
+
+export interface CloneProjectInput {
+  repositoryUrl: string;
+  branch: string;
+  /** Folder the repository is cloned INTO (it gets its own sub-folder). */
+  location: string;
+  projectName: string;
+  projectType: ProjectType;
+  description?: string;
+}
+
 export interface TreeEntry {
   name: string;
   path: string;
@@ -249,6 +270,11 @@ export const api = {
   listProjects: () => authed<Project[]>("/api/projects"),
   createProject: (input: CreateProjectInput) =>
     authed<Project>("/api/projects", { method: "POST", body: JSON.stringify(input) }),
+  inspectRepository: (repositoryUrl: string) =>
+    authed<RepositoryInfo>("/api/projects/clone/inspect", { method: "POST", body: JSON.stringify({ repositoryUrl }) }),
+  /** Resolves only when the clone is complete and the project is saved. */
+  cloneProject: (input: CloneProjectInput) =>
+    authed<Project>("/api/projects/clone", { method: "POST", body: JSON.stringify(input) }),
   deleteProject: (projectId: string, confirmName: string) =>
     authed<void>(`/api/projects/${projectId}?confirmName=${encodeURIComponent(confirmName)}`, { method: "DELETE" }),
   projectConfig: () => authed<{ root: string | null; roots: string[] }>("/api/projects/config"),

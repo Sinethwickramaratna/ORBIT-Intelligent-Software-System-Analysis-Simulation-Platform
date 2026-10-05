@@ -6,6 +6,7 @@ import SettingsDialog from "./SettingsDialog";
 import ApplyFallback from "./ApplyFallback";
 import { useFolderApply } from "@/lib/useFolderApply";
 import ProjectDialog from "./ProjectDialog";
+import CloneDialog from "./CloneDialog";
 import ProjectMenu from "./ProjectMenu";
 import DeleteProjectDialog from "./DeleteProjectDialog";
 import FileTree from "./FileTree";
@@ -125,6 +126,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
     }
   }
   const [creating, setCreating] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [folderSettings, setFolderSettings] = useState<FolderSettings | null>(null);
@@ -178,6 +180,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
       /* ignore */
     }
     setCreating(false);
+    setCloning(false);
   }
 
   // Restore the last choice (per browser only; purely a convenience).
@@ -348,7 +351,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
                 <PlusIcon />
                 <span>Create New Project</span>
               </button>
-              <button type="button" className="action-tile">
+              <button type="button" className="action-tile" onClick={() => setCloning(true)}>
                 <GitIcon />
                 <span>Git Clone Repo</span>
               </button>
@@ -381,6 +384,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onSaved={setFolderSettings} />}
       {deleting && <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} onDeleted={onDeleted} />}
       {creating && <ProjectDialog onClose={() => setCreating(false)} onCreated={onCreated} />}
+      {cloning && <CloneDialog onClose={() => setCloning(false)} onCreated={onCreated} />}
 
       <footer className="statusbar">
         <span className="status-item">ORBIT</span>

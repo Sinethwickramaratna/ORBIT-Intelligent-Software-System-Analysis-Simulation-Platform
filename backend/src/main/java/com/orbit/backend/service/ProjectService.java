@@ -1,11 +1,13 @@
 package com.orbit.backend.service;
 
+import com.orbit.backend.dto.request.CloneProjectRequest;
 import com.orbit.backend.dto.request.CreateProjectRequest;
 import com.orbit.backend.dto.response.ProjectConfigResponse;
 import com.orbit.backend.dto.response.ProjectInspectResponse;
 import com.orbit.backend.dto.response.ProjectResponse;
 import com.orbit.backend.dto.response.ProjectResponse.GitStatus;
 import com.orbit.backend.dto.response.ProjectTreeResponse;
+import com.orbit.backend.dto.response.RepositoryInspectResponse;
 import com.orbit.backend.entity.Project;
 import com.orbit.backend.exception.ApiException;
 import com.orbit.backend.exception.ErrorCode;
@@ -34,6 +36,7 @@ public class ProjectService {
     private final ProjectPathResolver pathResolver;
     private final GitService gitService;
     private final ProjectFileService fileService;
+    private final GitCloneService cloneService;
 
     public ProjectResponse create(UUID userId, CreateProjectRequest request) {
         String name = request.projectName().trim();
@@ -93,6 +96,76 @@ public class ProjectService {
         }
         log.info("User {} created project '{}' ({}) at {} [git: {}]", userId, name, project.getProjectId(), folder, gitStatus);
         return ProjectResponse.from(project, true, gitService.hasRepository(folder), gitStatus, folderCreated);
+    }
+
+    /** "Check Repository": a repository that cannot be reached is an ordinary answer ({@code found=false}), not an error. */
+    public RepositoryInspectResponse inspectRepository(String repositoryUrl) {
+        try {
+            return cloneService.inspect(repositoryUrl);
+        } catch (ApiException e) {
+            if (e.getErrorCode() == ErrorCode.GIT_URL_INVALID || e.getErrorCode() == ErrorCode.GIT_REPOSITORY_UNAVAILABLE) {
+                return RepositoryInspectResponse.notFound(e.getMessage());
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Clones a public repository into {@code <location>/<repository name>} and registers it as a project. Blocks until
+     * the clone is finished. Only the name, the folder the clone ended up in, the description and the type are stored.
+     */
+    public ProjectResponse cloneProject(UUID userId, CloneProjectRequest request) {
+        String name = request.projectName().trim();
+        if (name.isEmpty()) {
+            throw new ApiException(ErrorCode.VALIDATION_FAILED, "Project name is required");
+        }
+        GitCloneService.RepoRef repo = cloneService.parse(request.repositoryUrl());
+        String parent = ProjectPathResolver.tidy(request.location());
+        ProjectPathResolver.Resolved where = pathResolver.resolve(
+                (parent.endsWith("/") ? parent : parent + "/") + GitCloneService.folderName(repo.name()));
+
+        for (Project existing : projectRepository.findByUser_UserIdOrderByCreatedAtDesc(userId)) {
+            if (ProjectPathResolver.sameLocation(existing.getLocation(), where.location())) {
+                throw new ApiException(ErrorCode.PROJECT_ALREADY_EXISTS);
+            }
+        }
+
+        Path folder = where.path();
+        boolean folderCreated = !Files.exists(folder);
+        if (!folderCreated) {
+            if (!Files.isDirectory(folder)) {
+                throw new ApiException(ErrorCode.PROJECT_LOCATION_NOT_DIRECTORY);
+            }
+            try (var entries = Files.list(folder)) {
+                if (entries.findAny().isPresent()) {
+                    throw new ApiException(ErrorCode.PROJECT_CLONE_TARGET_EXISTS,
+                            "The folder " + where.location() + " already exists and is not empty - choose another clone location");
+                }
+            } catch (IOException e) {
+                throw new ApiException(ErrorCode.PROJECT_FOLDER_UNAVAILABLE);
+            }
+        }
+
+        cloneService.cloneRepository(repo, request.branch(), folder);
+
+        Project project = new Project();
+        project.setProjectName(name);
+        project.setLocation(where.location());
+        project.setProjectType(request.projectType());
+        project.setDescription(blankToNull(request.description()));
+        project.setUser(userRepository.getReferenceById(userId));
+        try {
+            project = projectRepository.saveAndFlush(project);
+        } catch (DataIntegrityViolationException e) {
+            GitCloneService.cleanup(folder, !folderCreated);
+            throw new ApiException(ErrorCode.PROJECT_ALREADY_EXISTS);
+        } catch (RuntimeException e) {
+            GitCloneService.cleanup(folder, !folderCreated); // never keep a clone ORBIT does not know about
+            throw e;
+        }
+        log.info("User {} cloned {} (branch {}) as project '{}' ({}) at {}", userId, repo.url(), request.branch(), name,
+                project.getProjectId(), folder);
+        return ProjectResponse.from(project, true, gitService.hasRepository(folder), null, folderCreated);
     }
 
     public List<ProjectResponse> list(UUID userId) {
