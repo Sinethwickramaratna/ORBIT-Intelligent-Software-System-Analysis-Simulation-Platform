@@ -37,6 +37,7 @@ public class ProjectService {
     private final GitService gitService;
     private final ProjectFileService fileService;
     private final GitCloneService cloneService;
+    private final ProjectScanService scanService;
 
     public ProjectResponse create(UUID userId, CreateProjectRequest request) {
         String name = request.projectName().trim();
@@ -95,6 +96,7 @@ public class ProjectService {
             throw new ApiException(ErrorCode.PROJECT_ALREADY_EXISTS); // lost a race with a concurrent create
         }
         log.info("User {} created project '{}' ({}) at {} [git: {}]", userId, name, project.getProjectId(), folder, gitStatus);
+        scanService.scanQuietly(project); // language detection; a failing scan never fails the creation
         return ProjectResponse.from(project, true, gitService.hasRepository(folder), gitStatus, folderCreated);
     }
 
@@ -165,6 +167,7 @@ public class ProjectService {
         }
         log.info("User {} cloned {} (branch {}) as project '{}' ({}) at {}", userId, repo.url(), request.branch(), name,
                 project.getProjectId(), folder);
+        scanService.scanQuietly(project); // language detection; a failing scan never fails the clone
         return ProjectResponse.from(project, true, gitService.hasRepository(folder), null, folderCreated);
     }
 

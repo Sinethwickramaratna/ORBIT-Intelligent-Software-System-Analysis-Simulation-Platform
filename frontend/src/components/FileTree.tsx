@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { api, type TreeEntry } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, ApiError, type ProjectScan, type TreeEntry } from "@/lib/api";
+import AnalysisPanel from "./AnalysisPanel";
 
 interface NodeState {
   entries?: TreeEntry[];
@@ -27,15 +28,50 @@ const FileGlyph = () => (
   </svg>
 );
 
-/** Visual-Studio-style solution explorer. Folders load one level at a time when expanded. */
+const ScanGlyph = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+    <path d="M7 12h10" />
+  </svg>
+);
+
+/** Height of the Analysis window (px): the user drags the splitter above it; the choice is remembered. */
+const PANEL_KEY = "orbit.analysis.height";
+const PANEL_DEFAULT = 300;
+const PANEL_MIN = 96;
+const TREE_MIN = 120; // the file tree always keeps at least this much room
+
+function storedPanelHeight(): number {
+  try {
+    const n = Number(localStorage.getItem(PANEL_KEY));
+    return Number.isFinite(n) && n >= PANEL_MIN ? n : PANEL_DEFAULT;
+  } catch {
+    return PANEL_DEFAULT;
+  }
+}
+
+/**
+ * Visual-Studio-style solution explorer. Folders load one level at a time when expanded. Under the tree sits the
+ * Analysis window with the language scan of the project; the Scan button runs the scan again after the folder changed.
+ */
 export default function FileTree({ projectId, projectName }: { projectId: string; projectName: string }) {
   const [nodes, setNodes] = useState<Record<string, NodeState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
 
+  const [scan, setScan] = useState<ProjectScan | null>(null);
+  const [scanLoading, setScanLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const activeProject = useRef(projectId);
+
+  const [panelHeight, setPanelHeight] = useState(PANEL_DEFAULT);
+  const asideRef = useRef<HTMLElement>(null);
+  const drag = useRef<{ startY: number; startHeight: number } | null>(null);
+
   const load = useCallback(
-    async (path: string) => {
-      setNodes((n) => ({ ...n, [path]: { ...n[path], loading: true, error: undefined } }));
+    async (path: string, silent = false) => {
+      if (!silent) setNodes((n) => ({ ...n, [path]: { ...n[path], loading: true, error: undefined } }));
       try {
         const t = await api.projectTree(projectId, path);
         setNodes((n) => ({ ...n, [path]: { entries: t.entries, truncated: t.truncated } }));
@@ -52,6 +88,109 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     setSelected(null);
     load("");
   }, [projectId, load]);
+
+  // the stored scan of the opened project (it was made automatically when the project was created or cloned)
+  useEffect(() => {
+    activeProject.current = projectId;
+    setScan(null);
+    setScanError(null);
+    setScanning(false);
+    setScanLoading(true);
+    api
+      .latestScan(projectId)
+      .then((s) => {
+        if (activeProject.current === projectId) setScan(s ?? null);
+      })
+      .catch((e) => {
+        if (activeProject.current === projectId) setScanError(e instanceof Error ? e.message : "Could not load the analysis.");
+      })
+      .finally(() => {
+        if (activeProject.current === projectId) setScanLoading(false);
+      });
+  }, [projectId]);
+
+  async function runScan() {
+    if (scanning) return;
+    const id = projectId;
+    setScanning(true);
+    setScanError(null);
+    try {
+      const result = await api.scanProject(id);
+      if (activeProject.current !== id) return;
+      setScan(result);
+      // the folder may have changed: show its current structure too (folders stay open, no flicker)
+      Object.keys(nodes).forEach((p) => load(p, true));
+    } catch (e) {
+      if (activeProject.current === id) {
+        setScanError(e instanceof ApiError || e instanceof Error ? e.message : "The scan failed.");
+      }
+    } finally {
+      if (activeProject.current === id) setScanning(false);
+    }
+  }
+
+  // ---- Analysis window height: restore, clamp to the room available, drag with mouse/touch/keyboard ----
+  const maxPanel = useCallback(() => {
+    const aside = asideRef.current;
+    if (!aside) return PANEL_MIN;
+    // everything except the tree and the analysis window (header, project name, splitter), measured, not guessed
+    const used = [".explorer-head", ".explorer-root", ".explorer-split"].reduce(
+      (sum, sel) => sum + (aside.querySelector<HTMLElement>(sel)?.offsetHeight ?? 0),
+      0,
+    );
+    return Math.max(PANEL_MIN, aside.clientHeight - used - TREE_MIN);
+  }, []);
+  const clampPanel = useCallback(
+    (h: number) => (asideRef.current?.clientHeight ? Math.min(Math.max(h, PANEL_MIN), maxPanel()) : Math.max(h, PANEL_MIN)),
+    [maxPanel],
+  );
+
+  useEffect(() => {
+    setPanelHeight(clampPanel(storedPanelHeight()));
+    const el = asideRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setPanelHeight((h) => clampPanel(h)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [clampPanel]);
+
+  function saveHeight(h: number) {
+    try {
+      localStorage.setItem(PANEL_KEY, String(Math.round(h)));
+    } catch {
+      /* the height just is not remembered */
+    }
+  }
+
+  function onSplitDown(ev: React.PointerEvent<HTMLDivElement>) {
+    ev.preventDefault();
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    drag.current = { startY: ev.clientY, startHeight: panelHeight };
+  }
+  function onSplitMove(ev: React.PointerEvent<HTMLDivElement>) {
+    const d = drag.current;
+    if (!d) return;
+    setPanelHeight(clampPanel(d.startHeight + (d.startY - ev.clientY))); // dragging up makes the window taller
+  }
+  function onSplitUp(ev: React.PointerEvent<HTMLDivElement>) {
+    if (!drag.current) return;
+    drag.current = null;
+    if (ev.currentTarget.hasPointerCapture(ev.pointerId)) ev.currentTarget.releasePointerCapture(ev.pointerId);
+    saveHeight(panelHeight);
+  }
+  function onSplitKey(ev: React.KeyboardEvent<HTMLDivElement>) {
+    const step = ev.shiftKey ? 64 : 16;
+    let next: number | null = null;
+    if (ev.key === "ArrowUp") next = panelHeight + step;
+    else if (ev.key === "ArrowDown") next = panelHeight - step;
+    else if (ev.key === "Home") next = PANEL_MIN;
+    else if (ev.key === "End") next = maxPanel();
+    if (next === null) return;
+    ev.preventDefault();
+    const h = clampPanel(next);
+    setPanelHeight(h);
+    saveHeight(h);
+  }
 
   function toggle(entry: TreeEntry) {
     setSelected(entry.path);
@@ -107,12 +246,46 @@ export default function FileTree({ projectId, projectName }: { projectId: string
   }
 
   return (
-    <aside className="explorer" aria-label="Project files">
+    <aside className="explorer" aria-label="Project files" ref={asideRef}>
       <div className="explorer-head">
         <span className="sidebar-title">EXPLORER</span>
+        <button
+          type="button"
+          className="scan-btn"
+          onClick={runScan}
+          disabled={scanning}
+          title="Scan the project folder again (use it after you changed files)"
+        >
+          <ScanGlyph />
+          {scanning ? "Scanning…" : "Scan"}
+        </button>
       </div>
       <div className="explorer-root" title={projectName}>{projectName}</div>
       <div className="tree" role="tree" aria-label={`${projectName} files`}>{renderLevel("", 0)}</div>
+      <div
+        className="explorer-split"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize the analysis window"
+        aria-valuemin={PANEL_MIN}
+        aria-valuemax={Math.round(maxPanel())}
+        aria-valuenow={Math.round(panelHeight)}
+        tabIndex={0}
+        onPointerDown={onSplitDown}
+        onPointerMove={onSplitMove}
+        onPointerUp={onSplitUp}
+        onPointerCancel={onSplitUp}
+        onKeyDown={onSplitKey}
+        onDoubleClick={() => {
+          const h = clampPanel(PANEL_DEFAULT);
+          setPanelHeight(h);
+          saveHeight(h);
+        }}
+        title="Drag to resize (double-click to reset)"
+      />
+      <div className="analysis-wrap" style={{ height: panelHeight }}>
+        <AnalysisPanel scan={scan} loading={scanLoading} scanning={scanning} error={scanError} />
+      </div>
     </aside>
   );
 }

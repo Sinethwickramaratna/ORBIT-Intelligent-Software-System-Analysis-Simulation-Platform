@@ -118,6 +118,24 @@ export interface ProjectTree {
   truncated: boolean;
 }
 
+/** What a scan found for one language. `percentage` is the share of all source-code lines. */
+export interface LanguageShare {
+  language: string;
+  files: number;
+  lines: number;
+  percentage: number;
+}
+
+/** One stored scan of a project; `languages` arrives sorted by lines, largest first. */
+export interface ProjectScan {
+  scanId: string;
+  projectId: string;
+  scannedAt: string;
+  totalFiles: number;
+  totalLines: number;
+  languages: LanguageShare[];
+}
+
 export interface LocationInspection {
   valid: boolean;
   message: string | null;
@@ -286,6 +304,10 @@ export const api = {
     authed<FolderBrowse>("/api/projects/browse/folder", { method: "POST", body: JSON.stringify({ parent, name }) }),
   projectTree: (projectId: string, path = "") =>
     authed<ProjectTree>(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`),
+  /** The Scan button: reads the project folder again and stores a new scan. */
+  scanProject: (projectId: string) => authed<ProjectScan>(`/api/projects/${projectId}/scan`, { method: "POST" }),
+  /** The newest stored scan; `undefined` (HTTP 204) when the project was never scanned. */
+  latestScan: (projectId: string) => authed<ProjectScan | undefined>(`/api/projects/${projectId}/scan`),
 
   currentUser: () => authed<User>("/api/users/me"),
 

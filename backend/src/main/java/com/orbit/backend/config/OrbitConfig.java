@@ -6,7 +6,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 /** Feature switches kept out of BackendApplication so the generated main class stays untouched. */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(OrbitProperties.class)
+@EnableConfigurationProperties({OrbitProperties.class, ScanProperties.class})
 @EnableScheduling
 public class OrbitConfig {
 }

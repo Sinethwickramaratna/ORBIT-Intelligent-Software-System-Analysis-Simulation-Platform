@@ -34,6 +34,7 @@ public enum ErrorCode {
     PROJECT_LOCATION_NOT_DIRECTORY(HttpStatus.BAD_REQUEST, "The project location exists but is not a folder"),
     PROJECT_FOLDER_UNAVAILABLE(HttpStatus.CONFLICT, "The project folder cannot be read right now"),
     PROJECT_PATH_INVALID(HttpStatus.BAD_REQUEST, "That path is not inside the project"),
+    PROJECT_SCAN_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "The project could not be scanned"),
     PROJECT_GIT_INIT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "Git could not be initialized in the project folder"),
     GIT_URL_INVALID(HttpStatus.BAD_REQUEST, "That is not a valid repository URL"),
     GIT_REPOSITORY_UNAVAILABLE(HttpStatus.BAD_REQUEST, "The repository could not be reached"),

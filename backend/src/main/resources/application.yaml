@@ -40,6 +40,12 @@ orbit:
     # Docker with several drives/folders: "host|container,host|container" (see docker-compose.yml / ORBIT_MOUNT_n)
     mounts: ${ORBIT_PROJECTS_MOUNTS:}
     container-root: ${ORBIT_PROJECTS_CONTAINER_ROOT:}
+  scan:
+    # Folders skipped by the language scan wherever they appear: dependencies and build output are not the project's
+    # own source code and would distort the language percentages. Setting this list replaces the defaults.
+    ignored-folders: node_modules,.git,target,build,dist,venv,__pycache__,.venv,.next,.gradle
+    # Files above this size (minified/generated bundles) are left out of the scan
+    max-file-bytes: 2097152
   jwt:
     # Created by the user in the first-run setup screen and stored as JWT_SECRET in .env
     secret: ${JWT_SECRET:}

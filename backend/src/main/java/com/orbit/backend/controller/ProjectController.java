@@ -9,13 +9,16 @@ import com.orbit.backend.service.FolderBrowseService;
 import com.orbit.backend.dto.response.ProjectConfigResponse;
 import com.orbit.backend.dto.response.ProjectInspectResponse;
 import com.orbit.backend.dto.response.ProjectResponse;
+import com.orbit.backend.dto.response.ProjectScanResponse;
 import com.orbit.backend.dto.response.ProjectTreeResponse;
 import com.orbit.backend.dto.response.RepositoryInspectResponse;
 import com.orbit.backend.entity.AuthenticatedUser;
+import com.orbit.backend.service.ProjectScanService;
 import com.orbit.backend.service.ProjectService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,6 +41,7 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final FolderBrowseService folderBrowseService;
+    private final ProjectScanService scanService;
 
     @GetMapping
     public List<ProjectResponse> list(@AuthenticationPrincipal AuthenticatedUser principal) {
@@ -101,6 +105,21 @@ public class ProjectController {
                                     @RequestParam(name = "path", required = false, defaultValue = "") String path,
                                     @AuthenticationPrincipal AuthenticatedUser principal) {
         return projectService.tree(principal.userId(), projectId, path);
+    }
+
+    /** The Scan button: reads the project folder again (it may have changed) and stores a new scan. */
+    @PostMapping("/{projectId}/scan")
+    public ProjectScanResponse scan(@PathVariable UUID projectId, @AuthenticationPrincipal AuthenticatedUser principal) {
+        return scanService.scan(principal.userId(), projectId);
+    }
+
+    /** The newest stored scan of the project; 204 No Content when it has never been scanned. */
+    @GetMapping("/{projectId}/scan")
+    public ResponseEntity<ProjectScanResponse> latestScan(@PathVariable UUID projectId,
+                                                          @AuthenticationPrincipal AuthenticatedUser principal) {
+        return scanService.latest(principal.userId(), projectId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     /**
