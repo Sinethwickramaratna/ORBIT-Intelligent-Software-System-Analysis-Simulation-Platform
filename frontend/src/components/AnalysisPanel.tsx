@@ -9,24 +9,39 @@ interface Props {
   loading: boolean;
   scanning: boolean;
   error: string | null;
+  /** Hidden = only the title bar is shown. */
+  open: boolean;
+  onToggle: () => void;
 }
 
 const number = (n: number) => n.toLocaleString();
 const percent = (p: number) => `${Number.isInteger(p) ? p : p.toFixed(1)}%`;
 
 /** "Analysis" window under the Explorer: language shares of the newest scan as a horizontal bar chart. */
-export default function AnalysisPanel({ scan, loading, scanning, error }: Props) {
+export default function AnalysisPanel({ scan, loading, scanning, error, open, onToggle }: Props) {
   // largest first, whatever order the server sent
   const languages = scan ? [...scan.languages].sort((a, b) => b.lines - a.lines || b.files - a.files || a.language.localeCompare(b.language)) : [];
 
   return (
     <section className="analysis" aria-label="Project analysis" aria-busy={scanning}>
       <div className="analysis-head">
-        <span className="sidebar-title">ANALYSIS</span>
+        <button
+          type="button"
+          className="analysis-toggle"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls="analysis-body"
+          title={open ? "Hide analysis (Ctrl+J)" : "Show analysis (Ctrl+J)"}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .1s" }}>
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+          <span className="sidebar-title">ANALYSIS</span>
+        </button>
         {scanning && <span className="analysis-status" role="status">Scanning…</span>}
       </div>
 
-      <div className="analysis-body">
+      <div className="analysis-body" id="analysis-body" hidden={!open}>
         {error && <div className="analysis-error" role="alert">{error}</div>}
 
         {!scan && !error && (

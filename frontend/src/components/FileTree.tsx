@@ -37,6 +37,7 @@ const ScanGlyph = () => (
 
 /** Height of the Analysis window (px): the user drags the splitter above it; the choice is remembered. */
 const PANEL_KEY = "orbit.analysis.height";
+const PANEL_OPEN_KEY = "orbit.analysis.open"; // "0" = hidden (only its title bar remains), like a VS Code panel
 const PANEL_DEFAULT = 300;
 const PANEL_MIN = 96;
 const TREE_MIN = 120; // the file tree always keeps at least this much room
@@ -66,6 +67,7 @@ export default function FileTree({ projectId, projectName }: { projectId: string
   const activeProject = useRef(projectId);
 
   const [panelHeight, setPanelHeight] = useState(PANEL_DEFAULT);
+  const [panelOpen, setPanelOpen] = useState(true);
   const asideRef = useRef<HTMLElement>(null);
   const drag = useRef<{ startY: number; startHeight: number } | null>(null);
 
@@ -153,6 +155,37 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     ro.observe(el);
     return () => ro.disconnect();
   }, [clampPanel]);
+
+  // restore whether the Analysis window was hidden
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(PANEL_OPEN_KEY) === "0") setPanelOpen(false);
+    } catch {
+      /* storage unavailable: stays open */
+    }
+  }, []);
+
+  const togglePanel = useCallback(() => {
+    const next = !panelOpen;
+    setPanelOpen(next);
+    try {
+      localStorage.setItem(PANEL_OPEN_KEY, next ? "1" : "0");
+    } catch {
+      /* the choice just is not remembered */
+    }
+  }, [panelOpen]);
+
+  // Ctrl/Cmd+J shows or hides the Analysis window, like the bottom panel in VS Code
+  useEffect(() => {
+    function onKey(ev: KeyboardEvent) {
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && ev.key.toLowerCase() === "j") {
+        ev.preventDefault();
+        togglePanel();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [togglePanel]);
 
   function saveHeight(h: number) {
     try {
@@ -262,6 +295,7 @@ export default function FileTree({ projectId, projectName }: { projectId: string
       </div>
       <div className="explorer-root" title={projectName}>{projectName}</div>
       <div className="tree" role="tree" aria-label={`${projectName} files`}>{renderLevel("", 0)}</div>
+      {panelOpen && (
       <div
         className="explorer-split"
         role="separator"
@@ -283,8 +317,9 @@ export default function FileTree({ projectId, projectName }: { projectId: string
         }}
         title="Drag to resize (double-click to reset)"
       />
-      <div className="analysis-wrap" style={{ height: panelHeight }}>
-        <AnalysisPanel scan={scan} loading={scanLoading} scanning={scanning} error={scanError} />
+      )}
+      <div className={`analysis-wrap${panelOpen ? "" : " collapsed"}`} style={panelOpen ? { height: panelHeight } : undefined}>
+        <AnalysisPanel scan={scan} loading={scanLoading} scanning={scanning} error={scanError} open={panelOpen} onToggle={togglePanel} />
       </div>
     </aside>
   );
