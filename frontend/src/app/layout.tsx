@@ -5,6 +5,7 @@ import "@fontsource/source-code-pro/400.css";
 import "@fontsource/source-code-pro/600.css";
 import "./globals.css";
 import "./home.css";
+import ScrollbarAutoHide from "@/components/ScrollbarAutoHide";
 
 export const metadata: Metadata = {
   title: "ORBIT",
@@ -20,7 +21,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <ScrollbarAutoHide />
+        {children}
+      </body>
     </html>
   );
 }
