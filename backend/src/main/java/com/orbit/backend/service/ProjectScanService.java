@@ -2,7 +2,12 @@ package com.orbit.backend.service;
 
 import com.orbit.backend.config.ScanProperties;
 import com.orbit.backend.dto.response.ProjectScanResponse;
+import com.orbit.backend.dto.response.ProjectScanResponse.BuildSystemFinding;
 import com.orbit.backend.dto.response.ProjectScanResponse.Counts;
+import com.orbit.backend.entity.BuildFileType;
+import com.orbit.backend.entity.BuildSystem;
+import com.orbit.backend.entity.ProjectBuildDetail;
+import com.orbit.backend.entity.ProjectBuildEvidence;
 import com.orbit.backend.entity.Language;
 import com.orbit.backend.entity.LanguageExtension;
 import com.orbit.backend.entity.Project;
@@ -10,10 +15,15 @@ import com.orbit.backend.entity.ProjectLanguageDetail;
 import com.orbit.backend.entity.ProjectScan;
 import com.orbit.backend.exception.ApiException;
 import com.orbit.backend.exception.ErrorCode;
+import com.orbit.backend.repository.BuildFileTypeRepository;
 import com.orbit.backend.repository.LanguageExtensionRepository;
+import com.orbit.backend.repository.ProjectBuildDetailRepository;
+import com.orbit.backend.repository.ProjectBuildEvidenceRepository;
 import com.orbit.backend.repository.ProjectLanguageDetailRepository;
 import com.orbit.backend.repository.ProjectRepository;
 import com.orbit.backend.repository.ProjectScanRepository;
+import com.orbit.backend.scan.BuildSystemScanner;
+import com.orbit.backend.scan.FileCounter;
 import com.orbit.backend.scan.LanguageScanner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +58,10 @@ public class ProjectScanService {
     private final LanguageExtensionRepository extensionRepository;
     private final ProjectScanRepository scanRepository;
     private final ProjectLanguageDetailRepository detailRepository;
+    private final BuildFileTypeRepository buildFileTypeRepository;
+    private final ProjectBuildDetailRepository buildDetailRepository;
+    private final ProjectBuildEvidenceRepository buildEvidenceRepository;
+    private final ScanProgressTracker progressTracker;
     private final ProjectPathResolver pathResolver;
     private final ScanProperties scanProperties;
     private final TransactionTemplate transaction;
@@ -56,6 +70,10 @@ public class ProjectScanService {
                               LanguageExtensionRepository extensionRepository,
                               ProjectScanRepository scanRepository,
                               ProjectLanguageDetailRepository detailRepository,
+                              BuildFileTypeRepository buildFileTypeRepository,
+                              ProjectBuildDetailRepository buildDetailRepository,
+                              ProjectBuildEvidenceRepository buildEvidenceRepository,
+                              ScanProgressTracker progressTracker,
                               ProjectPathResolver pathResolver,
                               ScanProperties scanProperties,
                               PlatformTransactionManager transactionManager) {
@@ -63,6 +81,10 @@ public class ProjectScanService {
         this.extensionRepository = extensionRepository;
         this.scanRepository = scanRepository;
         this.detailRepository = detailRepository;
+        this.buildFileTypeRepository = buildFileTypeRepository;
+        this.buildDetailRepository = buildDetailRepository;
+        this.buildEvidenceRepository = buildEvidenceRepository;
+        this.progressTracker = progressTracker;
         this.pathResolver = pathResolver;
         this.scanProperties = scanProperties;
         this.transaction = new TransactionTemplate(transactionManager);
@@ -81,8 +103,33 @@ public class ProjectScanService {
                     List<Counts> counts = detailRepository.findByScanIdWithLanguage(scan.getScanId()).stream()
                             .map(d -> new Counts(d.getLanguage().getLanguageName(), d.getNumberOfFiles(), d.getLinesOfCode()))
                             .toList();
-                    return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts);
+                    return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts,
+                            storedBuildSystems(scan.getScanId()));
                 });
+    }
+
+    /** How far the running scan of the project is (idle when none is running). */
+    public ScanProgressTracker.Progress progress(UUID userId, UUID projectId) {
+        return progressTracker.current(find(userId, projectId).getProjectId());
+    }
+
+    private List<BuildSystemFinding> storedBuildSystems(UUID scanId) {
+        Map<UUID, List<String>> evidence = new LinkedHashMap<>();
+        for (ProjectBuildEvidence e : buildEvidenceRepository.findByScanId(scanId)) {
+            evidence.computeIfAbsent(e.getId().getBuildSystemId(), k -> new ArrayList<>()).add(e.getId().getFilePath());
+        }
+        return buildDetailRepository.findByScanIdWithBuildSystem(scanId).stream()
+                .map(d -> new BuildSystemFinding(d.getBuildSystem().getName(),
+                        sortedEvidence(evidence.getOrDefault(d.getBuildSystem().getBuildSystemId(), List.of()))))
+                .toList();
+    }
+
+    /** Shallowest path first (root build file before module build files), then alphabetical. */
+    private static List<String> sortedEvidence(List<String> paths) {
+        return paths.stream()
+                .sorted(java.util.Comparator.comparingInt((String p) -> (int) p.chars().filter(c -> c == '/').count())
+                        .thenComparing(java.util.Comparator.naturalOrder()))
+                .toList();
     }
 
     /**
@@ -120,12 +167,32 @@ public class ProjectScanService {
         }
         Set<String> ignored = new HashSet<>(scanProperties.ignoredFoldersOrDefault());
 
+        // build system name -> entity, and evidence file type -> build system name, both straight from the database
+        Map<String, BuildSystem> buildSystems = new LinkedHashMap<>();
+        Map<String, String> buildSystemByFileType = new LinkedHashMap<>();
+        for (BuildFileType f : buildFileTypeRepository.findAllWithBuildSystem()) {
+            buildSystems.putIfAbsent(f.getBuildSystem().getName(), f.getBuildSystem());
+            buildSystemByFileType.putIfAbsent(f.getFileType(), f.getBuildSystem().getName());
+        }
+
+        ScanProgressTracker.Run run = progressTracker.start(project.getProjectId());
         LanguageScanner.Result result;
+        BuildSystemScanner.Result builds;
         try {
-            result = new LanguageScanner(languageByExtension, ignored, scanProperties.maxFileBytesOrDefault()).scan(folder);
+            // 1. count the files (so the progress bar knows its end), 2. languages, 3. build systems (after the languages)
+            run.stage(ScanProgressTracker.COUNTING, 0, 0, 1);
+            int fileCount = FileCounter.count(folder, ignored);
+            run.stage(ScanProgressTracker.LANGUAGES, 0, 80, fileCount);
+            result = new LanguageScanner(languageByExtension, ignored, scanProperties.maxFileBytesOrDefault())
+                    .scan(folder, run::fileVisited);
+            run.stage(ScanProgressTracker.BUILD_SYSTEMS, 80, 20, fileCount);
+            builds = new BuildSystemScanner(buildSystemByFileType, ignored).scan(folder, run::fileVisited);
         } catch (IOException | RuntimeException e) {
             log.warn("Scan of {} failed: {}", folder, e.toString());
             throw new ApiException(ErrorCode.PROJECT_SCAN_FAILED);
+        } finally {
+            // the stored result is written below; the bar is only a hint and ends with the file work
+            run.finish();
         }
 
         ProjectScanResponse response = transaction.execute(status -> {
@@ -137,7 +204,19 @@ public class ProjectScanService {
                 counts.add(new Counts(name, stat.files(), stat.lines()));
             });
             detailRepository.saveAll(details);
-            return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts);
+
+            List<ProjectBuildDetail> buildDetails = new ArrayList<>();
+            List<ProjectBuildEvidence> evidence = new ArrayList<>();
+            List<BuildSystemFinding> findings = new ArrayList<>();
+            builds.evidenceByBuildSystem().forEach((name, paths) -> {
+                BuildSystem system = buildSystems.get(name);
+                buildDetails.add(new ProjectBuildDetail(scan, system));
+                paths.forEach(p -> evidence.add(new ProjectBuildEvidence(scan.getScanId(), system.getBuildSystemId(), p)));
+                findings.add(new BuildSystemFinding(name, paths));
+            });
+            buildDetailRepository.saveAll(buildDetails);
+            buildEvidenceRepository.saveAll(evidence);
+            return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts, findings);
         });
         log.info("Scanned project {} ({}): {} files, {} lines, {} skipped", project.getProjectId(), folder,
                 response.totalFiles(), response.totalLines(), result.skippedFiles());

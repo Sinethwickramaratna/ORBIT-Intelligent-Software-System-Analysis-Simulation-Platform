@@ -67,6 +67,11 @@ public final class LanguageScanner {
     }
 
     public Result scan(Path root) throws IOException {
+        return scan(root, () -> { });
+    }
+
+    /** @param onFile called once for every regular file visited (before it is looked at); drives the progress bar */
+    public Result scan(Path root, Runnable onFile) throws IOException {
         Map<String, int[]> totals = new TreeMap<>();   // language -> {files, lines}
         int[] skipped = {0};
 
@@ -85,6 +90,7 @@ public final class LanguageScanner {
                 if (!attrs.isRegularFile()) {
                     return FileVisitResult.CONTINUE; // symbolic links and special files are never followed
                 }
+                onFile.run();
                 String language = languageByExtension.get(extensionOf(file.getFileName().toString()));
                 if (language == null) {
                     return FileVisitResult.CONTINUE;

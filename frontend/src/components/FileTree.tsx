@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type ProjectScan, type TreeEntry } from "@/lib/api";
+import { api, ApiError, type ProjectScan, type ScanProgress, type TreeEntry } from "@/lib/api";
 import AnalysisPanel from "./AnalysisPanel";
+import BuildSystemPanel from "./BuildSystemPanel";
 
 interface NodeState {
   entries?: TreeEntry[];
@@ -38,6 +39,7 @@ const ScanGlyph = () => (
 /** Height of the Analysis window (px): the user drags the splitter above it; the choice is remembered. */
 const PANEL_KEY = "orbit.analysis.height";
 const PANEL_OPEN_KEY = "orbit.analysis.open"; // "0" = hidden (only its title bar remains), like a VS Code panel
+const BUILD_OPEN_KEY = "orbit.build.open"; // "0" = Build System window hidden
 const PANEL_DEFAULT = 300;
 const PANEL_MIN = 96;
 const TREE_MIN = 120; // the file tree always keeps at least this much room
@@ -64,6 +66,8 @@ export default function FileTree({ projectId, projectName }: { projectId: string
   const [scanLoading, setScanLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ScanProgress | null>(null);
+  const [buildOpen, setBuildOpen] = useState(true);
   const activeProject = useRef(projectId);
 
   const [panelHeight, setPanelHeight] = useState(PANEL_DEFAULT);
@@ -97,6 +101,7 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     setScan(null);
     setScanError(null);
     setScanning(false);
+    setProgress(null);
     setScanLoading(true);
     api
       .latestScan(projectId)
@@ -116,8 +121,24 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     const id = projectId;
     setScanning(true);
     setScanError(null);
+    setProgress({ active: true, phase: "Starting…", percent: 0 });
+    // the scan request stays open until it is finished: ask the server how far it is meanwhile
+    let polling = true;
+    const poll = window.setInterval(() => {
+      api
+        .scanProgress(id)
+        .then((p) => {
+          if (polling && activeProject.current === id && p.active) setProgress((old) => ({ ...p, percent: Math.max(p.percent, old?.percent ?? 0) }));
+        })
+        .catch(() => undefined);
+    }, 150);
     try {
       const result = await api.scanProject(id);
+      polling = false;
+      window.clearInterval(poll);
+      if (activeProject.current !== id) return;
+      setProgress({ active: true, phase: "Done", percent: 100 });
+      await new Promise((r) => setTimeout(r, 350)); // let the full bar be seen
       if (activeProject.current !== id) return;
       setScan(result);
       // the folder may have changed: show its current structure too (folders stay open, no flicker)
@@ -127,7 +148,12 @@ export default function FileTree({ projectId, projectName }: { projectId: string
         setScanError(e instanceof ApiError || e instanceof Error ? e.message : "The scan failed.");
       }
     } finally {
-      if (activeProject.current === id) setScanning(false);
+      polling = false;
+      window.clearInterval(poll);
+      if (activeProject.current === id) {
+        setScanning(false);
+        setProgress(null);
+      }
     }
   }
 
@@ -136,11 +162,13 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     const aside = asideRef.current;
     if (!aside) return PANEL_MIN;
     // everything except the tree and the analysis window (header, project name, splitter), measured, not guessed
-    const used = [".explorer-head", ".explorer-root", ".explorer-split"].reduce(
+    const used = [".explorer-head", ".scan-progress", ".explorer-root", ".explorer-split"].reduce(
       (sum, sel) => sum + (aside.querySelector<HTMLElement>(sel)?.offsetHeight ?? 0),
       0,
     );
-    return Math.max(PANEL_MIN, aside.clientHeight - used - TREE_MIN);
+    // the Build System window gives way (down to its title bar) when the Analysis window grows
+    const buildBar = (aside.querySelector<HTMLElement>(".build-wrap .build-head")?.offsetHeight ?? 0) + 1;
+    return Math.max(PANEL_MIN, aside.clientHeight - used - buildBar - TREE_MIN);
   }, []);
   const clampPanel = useCallback(
     (h: number) => (asideRef.current?.clientHeight ? Math.min(Math.max(h, PANEL_MIN), maxPanel()) : Math.max(h, PANEL_MIN)),
@@ -164,6 +192,24 @@ export default function FileTree({ projectId, projectName }: { projectId: string
       /* storage unavailable: stays open */
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(BUILD_OPEN_KEY) === "0") setBuildOpen(false);
+    } catch {
+      /* stays open */
+    }
+  }, []);
+
+  const toggleBuild = useCallback(() => {
+    const next = !buildOpen;
+    setBuildOpen(next);
+    try {
+      localStorage.setItem(BUILD_OPEN_KEY, next ? "1" : "0");
+    } catch {
+      /* the choice just is not remembered */
+    }
+  }, [buildOpen]);
 
   const togglePanel = useCallback(() => {
     const next = !panelOpen;
@@ -293,6 +339,17 @@ export default function FileTree({ projectId, projectName }: { projectId: string
           {scanning ? "Scanning…" : "Scan"}
         </button>
       </div>
+      {progress && (
+        <div className="scan-progress">
+          <div className="scan-progress-label">
+            <span>{progress.phase}</span>
+            <span>{progress.percent}%</span>
+          </div>
+          <div className="scan-progress-track" role="progressbar" aria-label="Scan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent} aria-valuetext={`${progress.phase} ${progress.percent}%`}>
+            <div className="scan-progress-fill" style={{ width: `${progress.percent}%` }} />
+          </div>
+        </div>
+      )}
       <div className="explorer-root" title={projectName}>{projectName}</div>
       <div className="tree" role="tree" aria-label={`${projectName} files`}>{renderLevel("", 0)}</div>
       {panelOpen && (
@@ -320,6 +377,9 @@ export default function FileTree({ projectId, projectName }: { projectId: string
       )}
       <div className={`analysis-wrap${panelOpen ? "" : " collapsed"}`} style={panelOpen ? { height: panelHeight } : undefined}>
         <AnalysisPanel scan={scan} loading={scanLoading} scanning={scanning} error={scanError} open={panelOpen} onToggle={togglePanel} />
+      </div>
+      <div className={`build-wrap${buildOpen ? "" : " collapsed"}`}>
+        <BuildSystemPanel scan={scan} loading={scanLoading} scanning={scanning} open={buildOpen} onToggle={toggleBuild} />
       </div>
     </aside>
   );

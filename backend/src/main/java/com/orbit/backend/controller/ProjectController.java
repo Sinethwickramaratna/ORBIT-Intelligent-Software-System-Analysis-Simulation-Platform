@@ -14,6 +14,7 @@ import com.orbit.backend.dto.response.ProjectTreeResponse;
 import com.orbit.backend.dto.response.RepositoryInspectResponse;
 import com.orbit.backend.entity.AuthenticatedUser;
 import com.orbit.backend.service.ProjectScanService;
+import com.orbit.backend.service.ScanProgressTracker;
 import com.orbit.backend.service.ProjectService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -120,6 +121,13 @@ public class ProjectController {
         return scanService.latest(principal.userId(), projectId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /** How far a running scan is: {@code {active, phase, percent}}; the UI polls it to draw the progress bar. */
+    @GetMapping("/{projectId}/scan/progress")
+    public ScanProgressTracker.Progress scanProgress(@PathVariable UUID projectId,
+                                                     @AuthenticationPrincipal AuthenticatedUser principal) {
+        return scanService.progress(principal.userId(), projectId);
     }
 
     /**

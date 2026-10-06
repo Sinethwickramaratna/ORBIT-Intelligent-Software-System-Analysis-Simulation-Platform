@@ -17,7 +17,12 @@ public record ProjectScanResponse(
         Instant scannedAt,
         int totalFiles,
         long totalLines,
-        List<LanguageShare> languages) {
+        List<LanguageShare> languages,
+        List<BuildSystemFinding> buildSystems) {
+
+    /** A build system found in the project and the files that prove it ("Build System: Maven, Evidence: pom.xml"). */
+    public record BuildSystemFinding(String name, List<String> evidence) {
+    }
 
     /** What was counted for one language (the input of {@link #of}). */
     public record Counts(String language, int files, int lines) {
@@ -32,6 +37,11 @@ public record ProjectScanResponse(
             .thenComparing(c -> c.language().toLowerCase(Locale.ROOT));
 
     public static ProjectScanResponse of(UUID scanId, UUID projectId, Instant scannedAt, Collection<Counts> counts) {
+        return of(scanId, projectId, scannedAt, counts, List.of());
+    }
+
+    public static ProjectScanResponse of(UUID scanId, UUID projectId, Instant scannedAt, Collection<Counts> counts,
+                                         Collection<BuildSystemFinding> buildSystems) {
         long totalLines = 0;
         int totalFiles = 0;
         for (Counts c : counts) {
@@ -43,7 +53,10 @@ public record ProjectScanResponse(
                 .sorted(LARGEST_FIRST)
                 .map(c -> new LanguageShare(c.language(), c.files(), c.lines(), percentage(c.lines(), total)))
                 .toList();
-        return new ProjectScanResponse(scanId, projectId, scannedAt, totalFiles, totalLines, languages);
+        List<BuildSystemFinding> builds = buildSystems.stream()
+                .sorted(Comparator.comparing(b -> b.name().toLowerCase(Locale.ROOT)))
+                .toList();
+        return new ProjectScanResponse(scanId, projectId, scannedAt, totalFiles, totalLines, languages, builds);
     }
 
     /** {@code part / total} as a percentage rounded to one decimal; 0 when nothing was counted. */

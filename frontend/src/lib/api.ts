@@ -126,6 +126,19 @@ export interface LanguageShare {
   percentage: number;
 }
 
+/** A build system found in the project and the files (relative paths, shallowest first) that prove it. */
+export interface BuildSystemFinding {
+  name: string;
+  evidence: string[];
+}
+
+/** How far a running scan is. `percent` is 0-99 while `active`. */
+export interface ScanProgress {
+  active: boolean;
+  phase: string | null;
+  percent: number;
+}
+
 /** One stored scan of a project; `languages` arrives sorted by lines, largest first. */
 export interface ProjectScan {
   scanId: string;
@@ -134,6 +147,8 @@ export interface ProjectScan {
   totalFiles: number;
   totalLines: number;
   languages: LanguageShare[];
+  /** Detected after the languages; sorted by name, empty when the project has no build file. */
+  buildSystems: BuildSystemFinding[];
 }
 
 export interface LocationInspection {
@@ -306,6 +321,8 @@ export const api = {
     authed<ProjectTree>(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`),
   /** The Scan button: reads the project folder again and stores a new scan. */
   scanProject: (projectId: string) => authed<ProjectScan>(`/api/projects/${projectId}/scan`, { method: "POST" }),
+  /** Progress of the scan that is running right now (poll it while `scanProject` is pending). */
+  scanProgress: (projectId: string) => authed<ScanProgress>(`/api/projects/${projectId}/scan/progress`),
   /** The newest stored scan; `undefined` (HTTP 204) when the project was never scanned. */
   latestScan: (projectId: string) => authed<ProjectScan | undefined>(`/api/projects/${projectId}/scan`),
 
