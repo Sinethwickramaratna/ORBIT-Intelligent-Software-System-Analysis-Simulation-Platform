@@ -55,21 +55,27 @@
 
 * { box-sizing: border-box; }
 
-/* ---------- themed scrollbars (follow the active theme's tokens) ---------- */
+/* ---------- scrollbars: VS Code style (14px, square, flat grey thumb that darkens on hover/drag) ---------- */
 html { color-scheme: dark; }
 [data-theme="orbit-light"], [data-theme="vs-light"], [data-theme="solarized-light"] { color-scheme: light; }
-:root { --sb-size: 10px; --sb-thumb: color-mix(in srgb, var(--muted) 38%, transparent); --sb-thumb-hover: color-mix(in srgb, var(--accent) 70%, transparent); }
+:root {
+  --sb-size: 14px;
+  --sb-thumb: rgba(121, 121, 121, .4);
+  --sb-thumb-hover: rgba(100, 100, 100, .7);
+  --sb-thumb-active: rgba(191, 191, 191, .4);
+}
+[data-theme="orbit-light"], [data-theme="vs-light"], [data-theme="solarized-light"] {
+  --sb-thumb: rgba(100, 100, 100, .4);
+  --sb-thumb-hover: rgba(100, 100, 100, .7);
+  --sb-thumb-active: rgba(0, 0, 0, .6);
+}
 /* Firefox has no ::-webkit-scrollbar, so it gets the standard properties; Chromium/Safari use the pseudo-elements below */
-@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--sb-thumb) transparent; } }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: auto; scrollbar-color: var(--sb-thumb) transparent; } }
 ::-webkit-scrollbar { width: var(--sb-size); height: var(--sb-size); background: transparent; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: var(--sb-thumb); border-radius: 999px;
-  border: 3px solid transparent; background-clip: content-box;
-  transition: background-color .15s ease;
-}
-::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); background-clip: content-box; }
-::-webkit-scrollbar-thumb:active { background: var(--accent); background-clip: content-box; }
+::-webkit-scrollbar-thumb { background-color: var(--sb-thumb); border-radius: 0; border: 0; min-height: 20px; min-width: 20px; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--sb-thumb-hover); }
+::-webkit-scrollbar-thumb:active { background-color: var(--sb-thumb-active); }
 ::-webkit-scrollbar-corner { background: transparent; }
 html, body { margin: 0; min-height: 100%; }
 body {

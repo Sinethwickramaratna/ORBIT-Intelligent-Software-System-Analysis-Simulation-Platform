@@ -472,9 +472,9 @@
 .scan-progress-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width .15s linear; }
 
 /* ---- Build System window (below Analysis) ---- */
-.build-wrap { flex: 0 1 190px; min-height: 37px; overflow: hidden; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+.build-wrap { flex: none; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-top: 0; }
 .build { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.build-wrap.collapsed { flex: none; min-height: 0; }
+.build-wrap.collapsed { flex: none; min-height: 0; border-top: 1px solid var(--border); }
 .build-wrap.collapsed .build-head { padding-top: 8px; padding-bottom: 8px; }
 .build-item { margin: 0 0 12px; line-height: 1.5; }
 .build-name { font-weight: 600; }
