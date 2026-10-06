@@ -8,8 +8,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Remembers how far the scan of each project is, so the UI can show a progress bar while the (synchronous) scan
- * request is still running. A scan has three stages: counting the files, detecting languages (80 % of the bar) and
- * detecting build systems (the last 20 %). The state is in memory only and removed when the scan ends.
+ * request is still running. A scan has four stages: counting the files, detecting languages (70 % of the bar),
+ * detecting build systems (15 %) and detecting configuration files (the last 15 %). The state is in memory only and removed when the scan ends.
  */
 @Component
 public class ScanProgressTracker {
@@ -17,6 +17,7 @@ public class ScanProgressTracker {
     public static final String COUNTING = "Counting files";
     public static final String LANGUAGES = "Detecting languages";
     public static final String BUILD_SYSTEMS = "Detecting build systems";
+    public static final String CONFIGURATION = "Detecting configuration files";
 
     /** What the progress endpoint returns. */
     public record Progress(boolean active, String phase, int percent) {

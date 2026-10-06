@@ -132,6 +132,12 @@ export interface BuildSystemFinding {
   evidence: string[];
 }
 
+/** A configuration file name (as stored in the database) and every place, relative to the project, it was found. */
+export interface ConfigurationFileFinding {
+  fileName: string;
+  locations: string[];
+}
+
 /** How far a running scan is. `percent` is 0-99 while `active`. */
 export interface ScanProgress {
   active: boolean;
@@ -149,6 +155,8 @@ export interface ProjectScan {
   languages: LanguageShare[];
   /** Detected after the languages; sorted by name, empty when the project has no build file. */
   buildSystems: BuildSystemFinding[];
+  /** Detected after the build systems; sorted by file name, empty when none were found. */
+  configurationFiles: ConfigurationFileFinding[];
 }
 
 export interface LocationInspection {

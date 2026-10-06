@@ -195,7 +195,7 @@
 .explorer { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); }
 .explorer-head { padding: 12px 14px 8px 16px; }
 .explorer-root { padding: 4px 16px 6px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree { flex: 1; min-height: 120px; overflow: auto; padding: 2px 0 12px; font-size: 13px; }
+.tree { flex: 1; min-height: 120px; overflow: auto; padding: 2px 0 12px; font-size: 13px; scrollbar-width: thin; }
 .tree-row { display: flex; align-items: center; gap: 4px; height: 24px; padding-right: 10px; cursor: pointer; color: var(--text); white-space: nowrap; }
 .tree-row:hover { background: var(--surface-2); }
 .tree-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -299,7 +299,7 @@
 .picker-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
 .chip:hover { color: var(--accent); border-color: var(--accent); }
-.picker-list { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px 0; }
+.picker-list { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px 0; scrollbar-width: thin; }
 .picker-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; font-size: 13px; cursor: default; user-select: none; color: var(--text); }
 .picker-row svg { flex: none; color: var(--accent); }
 .picker-row:hover { background: var(--surface-2); }
@@ -439,7 +439,7 @@
 .analysis { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .analysis-head, .build-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px 16px; }
 .analysis-status, .build-status { font-size: 11px; color: var(--muted); }
-.analysis-body, .build-body { flex: 1; min-height: 0; overflow: auto; padding: 0 14px 12px 16px; font-size: 12px; }
+.analysis-body, .build-body { flex: 1; min-height: 0; overflow: auto; padding: 0 14px 12px 16px; font-size: 12px; scrollbar-width: thin; }
 .analysis-empty, .build-empty { margin: 4px 0; color: var(--muted); line-height: 1.5; }
 .analysis-error { margin: 4px 0 8px; color: var(--danger); line-height: 1.4; }
 .analysis-summary { margin: 0 0 10px; display: grid; gap: 3px; }
@@ -472,12 +472,35 @@
 .scan-progress-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width .15s linear; }
 
 /* ---- Build System window (below Analysis) ---- */
-.build-wrap { flex: none; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-top: 0; }
+.build-wrap { flex: 0 1 190px; min-height: 37px; overflow: hidden; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
 .build { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.build-wrap.collapsed { flex: none; min-height: 0; border-top: 1px solid var(--border); }
+.build-wrap.collapsed { flex: none; min-height: 0; }
 .build-wrap.collapsed .build-head { padding-top: 8px; padding-bottom: 8px; }
 .build-item { margin: 0 0 12px; line-height: 1.5; }
 .build-name { font-weight: 600; }
 .build-label { color: var(--muted); font-weight: 400; }
 .build-evidence { list-style: none; margin: 2px 0 0; padding: 0 0 0 16px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; }
 .build-evidence li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Configuration window (below Build System; resizable like Analysis, can be hidden) ---- */
+.config-split { flex: none; height: 7px; margin: 0; cursor: ns-resize; background: var(--border); touch-action: none; position: relative; }
+.config-split::after { content: ""; position: absolute; left: 50%; top: 2px; width: 32px; height: 3px; margin-left: -16px; border-radius: 2px; background: var(--muted); opacity: .5; }
+.config-split:hover, .config-split:focus-visible { background: color-mix(in srgb, var(--accent) 55%, var(--border)); outline: none; }
+.config-wrap { flex: none; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.config-wrap.collapsed { border-top: 1px solid var(--border); }
+.config { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.config-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px 16px; }
+.config-wrap.collapsed .config-head { padding-top: 8px; padding-bottom: 8px; }
+.config-status { font-size: 11px; color: var(--muted); }
+.config-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; font: inherit; color: var(--muted); background: none; border: 0; cursor: pointer; }
+.config-toggle:hover { color: var(--text); }
+.config-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+.config-toggle .sidebar-title { color: inherit; }
+.config-body { flex: 1; min-height: 0; overflow: auto; padding: 0 14px 12px 16px; font-size: 12px; scrollbar-width: thin; }
+.config-body[hidden] { display: none; }
+.config-empty { margin: 4px 0; color: var(--muted); line-height: 1.5; }
+.config-item { margin: 0 0 12px; line-height: 1.5; }
+.config-name { font-weight: 600; }
+.config-label { color: var(--muted); font-weight: 400; }
+.config-evidence { list-style: none; margin: 2px 0 0; padding: 0 0 0 16px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; }
+.config-evidence li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

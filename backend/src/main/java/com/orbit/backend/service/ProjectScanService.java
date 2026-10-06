@@ -3,7 +3,10 @@ package com.orbit.backend.service;
 import com.orbit.backend.config.ScanProperties;
 import com.orbit.backend.dto.response.ProjectScanResponse;
 import com.orbit.backend.dto.response.ProjectScanResponse.BuildSystemFinding;
+import com.orbit.backend.dto.response.ProjectScanResponse.ConfigurationFileFinding;
 import com.orbit.backend.dto.response.ProjectScanResponse.Counts;
+import com.orbit.backend.entity.ConfigurationFile;
+import com.orbit.backend.entity.ProjectConfigurationDetail;
 import com.orbit.backend.entity.BuildFileType;
 import com.orbit.backend.entity.BuildSystem;
 import com.orbit.backend.entity.ProjectBuildDetail;
@@ -16,6 +19,8 @@ import com.orbit.backend.entity.ProjectScan;
 import com.orbit.backend.exception.ApiException;
 import com.orbit.backend.exception.ErrorCode;
 import com.orbit.backend.repository.BuildFileTypeRepository;
+import com.orbit.backend.repository.ConfigurationFileRepository;
+import com.orbit.backend.repository.ProjectConfigurationDetailRepository;
 import com.orbit.backend.repository.LanguageExtensionRepository;
 import com.orbit.backend.repository.ProjectBuildDetailRepository;
 import com.orbit.backend.repository.ProjectBuildEvidenceRepository;
@@ -23,6 +28,7 @@ import com.orbit.backend.repository.ProjectLanguageDetailRepository;
 import com.orbit.backend.repository.ProjectRepository;
 import com.orbit.backend.repository.ProjectScanRepository;
 import com.orbit.backend.scan.BuildSystemScanner;
+import com.orbit.backend.scan.ConfigFileScanner;
 import com.orbit.backend.scan.FileCounter;
 import com.orbit.backend.scan.LanguageScanner;
 import org.slf4j.Logger;
@@ -61,6 +67,8 @@ public class ProjectScanService {
     private final BuildFileTypeRepository buildFileTypeRepository;
     private final ProjectBuildDetailRepository buildDetailRepository;
     private final ProjectBuildEvidenceRepository buildEvidenceRepository;
+    private final ConfigurationFileRepository configurationFileRepository;
+    private final ProjectConfigurationDetailRepository configurationDetailRepository;
     private final ScanProgressTracker progressTracker;
     private final ProjectPathResolver pathResolver;
     private final ScanProperties scanProperties;
@@ -73,6 +81,8 @@ public class ProjectScanService {
                               BuildFileTypeRepository buildFileTypeRepository,
                               ProjectBuildDetailRepository buildDetailRepository,
                               ProjectBuildEvidenceRepository buildEvidenceRepository,
+                              ConfigurationFileRepository configurationFileRepository,
+                              ProjectConfigurationDetailRepository configurationDetailRepository,
                               ScanProgressTracker progressTracker,
                               ProjectPathResolver pathResolver,
                               ScanProperties scanProperties,
@@ -84,6 +94,8 @@ public class ProjectScanService {
         this.buildFileTypeRepository = buildFileTypeRepository;
         this.buildDetailRepository = buildDetailRepository;
         this.buildEvidenceRepository = buildEvidenceRepository;
+        this.configurationFileRepository = configurationFileRepository;
+        this.configurationDetailRepository = configurationDetailRepository;
         this.progressTracker = progressTracker;
         this.pathResolver = pathResolver;
         this.scanProperties = scanProperties;
@@ -104,13 +116,23 @@ public class ProjectScanService {
                             .map(d -> new Counts(d.getLanguage().getLanguageName(), d.getNumberOfFiles(), d.getLinesOfCode()))
                             .toList();
                     return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts,
-                            storedBuildSystems(scan.getScanId()));
+                            storedBuildSystems(scan.getScanId()), storedConfigurationFiles(scan.getScanId()));
                 });
     }
 
     /** How far the running scan of the project is (idle when none is running). */
     public ScanProgressTracker.Progress progress(UUID userId, UUID projectId) {
         return progressTracker.current(find(userId, projectId).getProjectId());
+    }
+
+    private List<ConfigurationFileFinding> storedConfigurationFiles(UUID scanId) {
+        Map<String, List<String>> byName = new LinkedHashMap<>();
+        for (ProjectConfigurationDetail d : configurationDetailRepository.findByScanIdWithFile(scanId)) {
+            byName.computeIfAbsent(d.getConfigurationFile().getFileName(), k -> new ArrayList<>()).add(d.getFilePath());
+        }
+        List<ConfigurationFileFinding> result = new ArrayList<>();
+        byName.forEach((name, paths) -> result.add(new ConfigurationFileFinding(name, sortedEvidence(paths))));
+        return result;
     }
 
     private List<BuildSystemFinding> storedBuildSystems(UUID scanId) {
@@ -175,18 +197,27 @@ public class ProjectScanService {
             buildSystemByFileType.putIfAbsent(f.getFileType(), f.getBuildSystem().getName());
         }
 
+        // configuration file name (as stored) -> entity, straight from the database
+        Map<String, ConfigurationFile> configurationFiles = new LinkedHashMap<>();
+        for (ConfigurationFile c : configurationFileRepository.findAllByOrderByFileNameAsc()) {
+            configurationFiles.putIfAbsent(c.getFileName(), c);
+        }
+
         ScanProgressTracker.Run run = progressTracker.start(project.getProjectId());
         LanguageScanner.Result result;
         BuildSystemScanner.Result builds;
+        ConfigFileScanner.Result configs;
         try {
             // 1. count the files (so the progress bar knows its end), 2. languages, 3. build systems (after the languages)
             run.stage(ScanProgressTracker.COUNTING, 0, 0, 1);
             int fileCount = FileCounter.count(folder, ignored);
-            run.stage(ScanProgressTracker.LANGUAGES, 0, 80, fileCount);
+            run.stage(ScanProgressTracker.LANGUAGES, 0, 70, fileCount);
             result = new LanguageScanner(languageByExtension, ignored, scanProperties.maxFileBytesOrDefault())
                     .scan(folder, run::fileVisited);
-            run.stage(ScanProgressTracker.BUILD_SYSTEMS, 80, 20, fileCount);
+            run.stage(ScanProgressTracker.BUILD_SYSTEMS, 70, 15, fileCount);
             builds = new BuildSystemScanner(buildSystemByFileType, ignored).scan(folder, run::fileVisited);
+            run.stage(ScanProgressTracker.CONFIGURATION, 85, 15, fileCount);
+            configs = new ConfigFileScanner(configurationFiles.keySet(), ignored).scan(folder, run::fileVisited);
         } catch (IOException | RuntimeException e) {
             log.warn("Scan of {} failed: {}", folder, e.toString());
             throw new ApiException(ErrorCode.PROJECT_SCAN_FAILED);
@@ -216,7 +247,17 @@ public class ProjectScanService {
             });
             buildDetailRepository.saveAll(buildDetails);
             buildEvidenceRepository.saveAll(evidence);
-            return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts, findings);
+
+            List<ProjectConfigurationDetail> configDetails = new ArrayList<>();
+            List<ConfigurationFileFinding> configFindings = new ArrayList<>();
+            configs.locationsByFileName().forEach((name, paths) -> {
+                ConfigurationFile file = configurationFiles.get(name);
+                paths.forEach(p -> configDetails.add(new ProjectConfigurationDetail(scan, file, p)));
+                configFindings.add(new ConfigurationFileFinding(name, paths));
+            });
+            configurationDetailRepository.saveAll(configDetails);
+            return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts, findings,
+                    configFindings);
         });
         log.info("Scanned project {} ({}): {} files, {} lines, {} skipped", project.getProjectId(), folder,
                 response.totalFiles(), response.totalLines(), result.skippedFiles());

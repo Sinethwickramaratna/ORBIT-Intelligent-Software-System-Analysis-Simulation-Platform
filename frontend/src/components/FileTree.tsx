@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ProjectScan, type ScanProgress, type TreeEntry } from "@/lib/api";
 import AnalysisPanel from "./AnalysisPanel";
 import BuildSystemPanel from "./BuildSystemPanel";
+import ConfigurationPanel from "./ConfigurationPanel";
+import { usePanelResize } from "./usePanelResize";
 
 interface NodeState {
   entries?: TreeEntry[];
@@ -36,27 +38,17 @@ const ScanGlyph = () => (
   </svg>
 );
 
-type Pane = "analysis" | "build";
-
-/** Height of the Analysis window (px): the user drags the splitter above it; the choice is remembered. */
-const PANEL_KEY = "orbit.analysis.height";
+/** Bottom windows of the Explorer: Analysis, Build System (shrinks to fit) and Configuration. */
+const PANEL_KEY = "orbit.analysis.height"; // the user drags the splitter above Analysis; the choice is remembered
 const PANEL_OPEN_KEY = "orbit.analysis.open"; // "0" = hidden (only its title bar remains), like a VS Code panel
 const BUILD_OPEN_KEY = "orbit.build.open"; // "0" = Build System window hidden
-const BUILD_KEY = "orbit.build.height";
+const CONFIG_KEY = "orbit.config.height";
+const CONFIG_OPEN_KEY = "orbit.config.open"; // "0" = Configuration window hidden
 const PANEL_DEFAULT = 300;
 const PANEL_MIN = 96;
-const BUILD_DEFAULT = 190;
-const BUILD_MIN = 72;
+const CONFIG_DEFAULT = 170;
+const CONFIG_MIN = 80;
 const TREE_MIN = 120; // the file tree always keeps at least this much room
-
-function storedHeight(key: string, def: number, min: number): number {
-  try {
-    const n = Number(localStorage.getItem(key));
-    return Number.isFinite(n) && n >= min ? n : def;
-  } catch {
-    return def;
-  }
-}
 
 /**
  * Visual-Studio-style solution explorer. Folders load one level at a time when expanded. Under the tree sits the
@@ -75,14 +67,9 @@ export default function FileTree({ projectId, projectName }: { projectId: string
   const [buildOpen, setBuildOpen] = useState(true);
   const activeProject = useRef(projectId);
 
-  const [panelHeight, setPanelHeight] = useState(PANEL_DEFAULT);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [buildHeight, setBuildHeight] = useState(BUILD_DEFAULT);
-  // latest heights/open flags for the resize math (also used inside the ResizeObserver)
-  const live = useRef({ panelHeight: PANEL_DEFAULT, buildHeight: BUILD_DEFAULT, panelOpen: true, buildOpen: true });
-  live.current = { panelHeight, buildHeight, panelOpen, buildOpen };
+  const [configOpen, setConfigOpen] = useState(true);
   const asideRef = useRef<HTMLElement>(null);
-  const drag = useRef<{ pane: Pane; startY: number; startHeight: number } | null>(null);
 
   const load = useCallback(
     async (path: string, silent = false) => {
@@ -166,52 +153,50 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     }
   }
 
-  // ---- Analysis + Build System window heights: restore, clamp to the room available, drag with mouse/touch/keyboard ----
-  // Room a window may use: the explorer minus its fixed parts (header, project name, splitters), the other window and the tree minimum.
-  const maxFor = useCallback((pane: Pane) => {
+  // ---- window heights: restore, clamp to the room available, drag with mouse/touch/keyboard ----
+  const measure = (sel: string) => asideRef.current?.querySelector<HTMLElement>(sel)?.offsetHeight ?? 0;
+  /** Room for the bottom windows: everything except the header, progress bar, project name, splitters and tree. */
+  const roomFor = (otherWindowSel: string) => {
     const aside = asideRef.current;
-    const min = pane === "analysis" ? PANEL_MIN : BUILD_MIN;
-    if (!aside) return min;
-    const h = (sel: string) => aside.querySelector<HTMLElement>(sel)?.offsetHeight ?? 0;
-    let used = [".explorer-head", ".scan-progress", ".explorer-root"].reduce((sum, sel) => sum + h(sel), 0);
-    aside.querySelectorAll<HTMLElement>(".explorer-split").forEach((el) => (used += el.offsetHeight));
-    const l = live.current;
-    // the other window: its set height when open, its title bar when hidden (measured, not guessed)
-    const other = pane === "analysis" ? (l.buildOpen ? l.buildHeight : h(".build-wrap")) : l.panelOpen ? l.panelHeight : h(".analysis-wrap");
-    return Math.max(min, aside.clientHeight - used - other - TREE_MIN);
-  }, []);
-  const clampFor = useCallback(
-    (pane: Pane, v: number) => {
-      const min = pane === "analysis" ? PANEL_MIN : BUILD_MIN;
-      return asideRef.current?.clientHeight ? Math.min(Math.max(v, min), maxFor(pane)) : Math.max(v, min);
-    },
-    [maxFor],
-  );
+    if (!aside) return 0;
+    const used = [".explorer-head", ".scan-progress", ".explorer-root", ".explorer-split", ".config-split", otherWindowSel].reduce(
+      (sum, sel) => sum + measure(sel),
+      0,
+    );
+    // the Build System window gives way (down to its title bar) when another window grows
+    const buildBar = measure(".build-wrap .build-head") + 1;
+    return aside.clientHeight - used - buildBar - TREE_MIN;
+  };
+  const hasRoom = () => !!asideRef.current?.clientHeight;
+  const analysis = usePanelResize({
+    storageKey: PANEL_KEY,
+    defaultHeight: PANEL_DEFAULT,
+    min: PANEL_MIN,
+    getMax: () => roomFor(".config-wrap"),
+    hasRoom,
+  });
+  const config = usePanelResize({
+    storageKey: CONFIG_KEY,
+    defaultHeight: CONFIG_DEFAULT,
+    min: CONFIG_MIN,
+    getMax: () => roomFor(".analysis-wrap"),
+    hasRoom,
+  });
+  const { restore: restoreAnalysis, reclamp: reclampAnalysis } = analysis;
+  const { restore: restoreConfig, reclamp: reclampConfig } = config;
 
-  // restore the stored heights once
   useEffect(() => {
-    setPanelHeight(clampFor("analysis", storedHeight(PANEL_KEY, PANEL_DEFAULT, PANEL_MIN)));
-    setBuildHeight(clampFor("build", storedHeight(BUILD_KEY, BUILD_DEFAULT, BUILD_MIN)));
-  }, [clampFor]);
-
-  // keep both windows inside the explorer when it is resized or a window is shown/hidden
-  useEffect(() => {
+    restoreAnalysis();
+    restoreConfig();
     const el = asideRef.current;
-    if (!el) return;
-    const fit = () => {
-      setPanelHeight((v) => {
-        const n = clampFor("analysis", v);
-        live.current.panelHeight = n;
-        return n;
-      });
-      setBuildHeight((v) => clampFor("build", v));
-    };
-    fit();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(fit);
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      reclampAnalysis();
+      reclampConfig();
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [clampFor, panelOpen, buildOpen]);
+  }, [restoreAnalysis, restoreConfig, reclampAnalysis, reclampConfig]);
 
   // restore whether the Analysis window was hidden
   useEffect(() => {
@@ -262,70 +247,23 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePanel]);
 
-  const panes = {
-    analysis: { height: panelHeight, set: setPanelHeight, key: PANEL_KEY, def: PANEL_DEFAULT, min: PANEL_MIN },
-    build: { height: buildHeight, set: setBuildHeight, key: BUILD_KEY, def: BUILD_DEFAULT, min: BUILD_MIN },
-  } as const;
-
-  function saveHeight(pane: Pane, h: number) {
+  useEffect(() => {
     try {
-      localStorage.setItem(panes[pane].key, String(Math.round(h)));
+      if (localStorage.getItem(CONFIG_OPEN_KEY) === "0") setConfigOpen(false);
     } catch {
-      /* the height just is not remembered */
+      /* stays open */
     }
-  }
+  }, []);
 
-  // one set of splitter handlers for both windows: dragging up makes the window below the splitter taller
-  function splitProps(pane: Pane, label: string) {
-    const cfg = panes[pane];
-    return {
-      className: "explorer-split",
-      role: "separator" as const,
-      "aria-orientation": "horizontal" as const,
-      "aria-label": label,
-      "aria-valuemin": cfg.min,
-      "aria-valuemax": Math.round(maxFor(pane)),
-      "aria-valuenow": Math.round(cfg.height),
-      tabIndex: 0,
-      title: "Drag to resize (double-click to reset)",
-      onPointerDown: (ev: React.PointerEvent<HTMLDivElement>) => {
-        ev.preventDefault();
-        ev.currentTarget.setPointerCapture(ev.pointerId);
-        drag.current = { pane, startY: ev.clientY, startHeight: cfg.height };
-      },
-      onPointerMove: (ev: React.PointerEvent<HTMLDivElement>) => {
-        const d = drag.current;
-        if (!d || d.pane !== pane) return;
-        const h = clampFor(pane, d.startHeight + (d.startY - ev.clientY));
-        live.current[pane === "analysis" ? "panelHeight" : "buildHeight"] = h;
-        cfg.set(h);
-      },
-      onPointerUp: (ev: React.PointerEvent<HTMLDivElement>) => {
-        if (drag.current?.pane !== pane) return;
-        drag.current = null;
-        if (ev.currentTarget.hasPointerCapture(ev.pointerId)) ev.currentTarget.releasePointerCapture(ev.pointerId);
-        saveHeight(pane, live.current[pane === "analysis" ? "panelHeight" : "buildHeight"]);
-      },
-      onKeyDown: (ev: React.KeyboardEvent<HTMLDivElement>) => {
-        const step = ev.shiftKey ? 64 : 16;
-        let next: number | null = null;
-        if (ev.key === "ArrowUp") next = cfg.height + step;
-        else if (ev.key === "ArrowDown") next = cfg.height - step;
-        else if (ev.key === "Home") next = cfg.min;
-        else if (ev.key === "End") next = maxFor(pane);
-        if (next === null) return;
-        ev.preventDefault();
-        const h = clampFor(pane, next);
-        cfg.set(h);
-        saveHeight(pane, h);
-      },
-      onDoubleClick: () => {
-        const h = clampFor(pane, cfg.def);
-        cfg.set(h);
-        saveHeight(pane, h);
-      },
-    };
-  }
+  const toggleConfig = useCallback(() => {
+    const next = !configOpen;
+    setConfigOpen(next);
+    try {
+      localStorage.setItem(CONFIG_OPEN_KEY, next ? "1" : "0");
+    } catch {
+      /* the choice just is not remembered */
+    }
+  }, [configOpen]);
 
   function toggle(entry: TreeEntry) {
     setSelected(entry.path);
@@ -408,13 +346,16 @@ export default function FileTree({ projectId, projectName }: { projectId: string
       )}
       <div className="explorer-root" title={projectName}>{projectName}</div>
       <div className="tree" role="tree" aria-label={`${projectName} files`}>{renderLevel("", 0)}</div>
-      {panelOpen && <div {...splitProps("analysis", "Resize the analysis window")} onPointerCancel={splitProps("analysis", "").onPointerUp} />}
-      <div className={`analysis-wrap${panelOpen ? "" : " collapsed"}`} style={panelOpen ? { height: panelHeight } : undefined}>
+      {panelOpen && <div className="explorer-split" {...analysis.splitterProps("Resize the analysis window")} />}
+      <div className={`analysis-wrap${panelOpen ? "" : " collapsed"}`} style={panelOpen ? { height: analysis.height } : undefined}>
         <AnalysisPanel scan={scan} loading={scanLoading} scanning={scanning} error={scanError} open={panelOpen} onToggle={togglePanel} />
       </div>
-      {buildOpen && <div {...splitProps("build", "Resize the build system window")} onPointerCancel={splitProps("build", "").onPointerUp} />}
-      <div className={`build-wrap${buildOpen ? "" : " collapsed"}`} style={buildOpen ? { height: buildHeight } : undefined}>
+      <div className={`build-wrap${buildOpen ? "" : " collapsed"}`}>
         <BuildSystemPanel scan={scan} loading={scanLoading} scanning={scanning} open={buildOpen} onToggle={toggleBuild} />
+      </div>
+      {configOpen && <div className="config-split" {...config.splitterProps("Resize the configuration window")} />}
+      <div className={`config-wrap${configOpen ? "" : " collapsed"}`} style={configOpen ? { height: config.height } : undefined}>
+        <ConfigurationPanel scan={scan} loading={scanLoading} scanning={scanning} open={configOpen} onToggle={toggleConfig} />
       </div>
     </aside>
   );

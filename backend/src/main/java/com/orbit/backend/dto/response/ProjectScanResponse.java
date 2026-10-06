@@ -18,7 +18,12 @@ public record ProjectScanResponse(
         int totalFiles,
         long totalLines,
         List<LanguageShare> languages,
-        List<BuildSystemFinding> buildSystems) {
+        List<BuildSystemFinding> buildSystems,
+        List<ConfigurationFileFinding> configurationFiles) {
+
+    /** A configuration file name and every place (relative path) it was found. */
+    public record ConfigurationFileFinding(String fileName, List<String> locations) {
+    }
 
     /** A build system found in the project and the files that prove it ("Build System: Maven, Evidence: pom.xml"). */
     public record BuildSystemFinding(String name, List<String> evidence) {
@@ -37,11 +42,17 @@ public record ProjectScanResponse(
             .thenComparing(c -> c.language().toLowerCase(Locale.ROOT));
 
     public static ProjectScanResponse of(UUID scanId, UUID projectId, Instant scannedAt, Collection<Counts> counts) {
-        return of(scanId, projectId, scannedAt, counts, List.of());
+        return of(scanId, projectId, scannedAt, counts, List.of(), List.of());
     }
 
     public static ProjectScanResponse of(UUID scanId, UUID projectId, Instant scannedAt, Collection<Counts> counts,
                                          Collection<BuildSystemFinding> buildSystems) {
+        return of(scanId, projectId, scannedAt, counts, buildSystems, List.of());
+    }
+
+    public static ProjectScanResponse of(UUID scanId, UUID projectId, Instant scannedAt, Collection<Counts> counts,
+                                         Collection<BuildSystemFinding> buildSystems,
+                                         Collection<ConfigurationFileFinding> configurationFiles) {
         long totalLines = 0;
         int totalFiles = 0;
         for (Counts c : counts) {
@@ -56,7 +67,10 @@ public record ProjectScanResponse(
         List<BuildSystemFinding> builds = buildSystems.stream()
                 .sorted(Comparator.comparing(b -> b.name().toLowerCase(Locale.ROOT)))
                 .toList();
-        return new ProjectScanResponse(scanId, projectId, scannedAt, totalFiles, totalLines, languages, builds);
+        List<ConfigurationFileFinding> configs = configurationFiles.stream()
+                .sorted(Comparator.comparing(c -> c.fileName().toLowerCase(Locale.ROOT)))
+                .toList();
+        return new ProjectScanResponse(scanId, projectId, scannedAt, totalFiles, totalLines, languages, builds, configs);
     }
 
     /** {@code part / total} as a percentage rounded to one decimal; 0 when nothing was counted. */

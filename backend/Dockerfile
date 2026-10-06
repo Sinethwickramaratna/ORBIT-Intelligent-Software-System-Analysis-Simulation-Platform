@@ -16,11 +16,13 @@ RUN sh /tmp/make-jre.sh /tmp/app.jar /opt/jre
 
 # ---- runtime: bare Alpine + the trimmed JRE + the jar --------------------------------------------------------------
 FROM alpine:3.21
-RUN addgroup -S orbit && adduser -S orbit -G orbit
+# /app is created and chowned here (tiny layer). Do NOT run `chown -R /app` after copying the jar: that re-writes the
+# whole ~65 MB jar into a second layer and doubles its size in the image. COPY --chown sets the owner for free.
+RUN addgroup -S orbit && adduser -S orbit -G orbit \
+ && mkdir /app && chown orbit:orbit /app
 WORKDIR /app
 COPY --from=jre /opt/jre /opt/jre
-COPY --from=build /build/target/orbit-backend.jar app.jar
-RUN chown -R orbit:orbit /app
+COPY --from=build --chown=orbit:orbit /build/target/orbit-backend.jar app.jar
 USER orbit
 
 # Per-machine settings file (JWT_SECRET etc.); docker-compose bind-mounts the project's .env here.
