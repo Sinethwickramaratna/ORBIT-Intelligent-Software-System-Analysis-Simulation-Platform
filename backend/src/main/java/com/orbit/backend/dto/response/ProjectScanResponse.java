@@ -19,7 +19,16 @@ public record ProjectScanResponse(
         long totalLines,
         List<LanguageShare> languages,
         List<BuildSystemFinding> buildSystems,
-        List<ConfigurationFileFinding> configurationFiles) {
+        List<ConfigurationFileFinding> configurationFiles,
+        List<FrameworkFinding> frameworks) {
+
+    /** A dependency declaration that proves a framework: manifest, 1-based line and column, dependency as written. */
+    public record FrameworkEvidence(String filePath, int line, int column, String dependency) {
+    }
+
+    /** A framework found in the project and the dependency declarations that prove it. */
+    public record FrameworkFinding(String name, List<FrameworkEvidence> evidence) {
+    }
 
     /** A configuration file name and every place (relative path) it was found. */
     public record ConfigurationFileFinding(String fileName, List<String> locations) {
@@ -53,6 +62,13 @@ public record ProjectScanResponse(
     public static ProjectScanResponse of(UUID scanId, UUID projectId, Instant scannedAt, Collection<Counts> counts,
                                          Collection<BuildSystemFinding> buildSystems,
                                          Collection<ConfigurationFileFinding> configurationFiles) {
+        return of(scanId, projectId, scannedAt, counts, buildSystems, configurationFiles, List.of());
+    }
+
+    public static ProjectScanResponse of(UUID scanId, UUID projectId, Instant scannedAt, Collection<Counts> counts,
+                                         Collection<BuildSystemFinding> buildSystems,
+                                         Collection<ConfigurationFileFinding> configurationFiles,
+                                         Collection<FrameworkFinding> frameworkFindings) {
         long totalLines = 0;
         int totalFiles = 0;
         for (Counts c : counts) {
@@ -70,7 +86,11 @@ public record ProjectScanResponse(
         List<ConfigurationFileFinding> configs = configurationFiles.stream()
                 .sorted(Comparator.comparing(c -> c.fileName().toLowerCase(Locale.ROOT)))
                 .toList();
-        return new ProjectScanResponse(scanId, projectId, scannedAt, totalFiles, totalLines, languages, builds, configs);
+        List<FrameworkFinding> frameworks = frameworkFindings.stream()
+                .sorted(Comparator.comparing(f -> f.name().toLowerCase(Locale.ROOT)))
+                .toList();
+        return new ProjectScanResponse(scanId, projectId, scannedAt, totalFiles, totalLines, languages, builds, configs,
+                frameworks);
     }
 
     /** {@code part / total} as a percentage rounded to one decimal; 0 when nothing was counted. */

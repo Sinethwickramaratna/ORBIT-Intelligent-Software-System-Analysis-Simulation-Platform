@@ -138,6 +138,20 @@ export interface ConfigurationFileFinding {
   locations: string[];
 }
 
+/** A dependency declaration that proves a framework: manifest (relative path), 1-based line and column, name as written. */
+export interface FrameworkEvidence {
+  filePath: string;
+  line: number;
+  column: number;
+  dependency: string;
+}
+
+/** A framework found in the project and the declarations that prove it (shallowest manifest first). */
+export interface FrameworkFinding {
+  name: string;
+  evidence: FrameworkEvidence[];
+}
+
 /** How far a running scan is. `percent` is 0-99 while `active`. */
 export interface ScanProgress {
   active: boolean;
@@ -157,6 +171,8 @@ export interface ProjectScan {
   buildSystems: BuildSystemFinding[];
   /** Detected after the build systems; sorted by file name, empty when none were found. */
   configurationFiles: ConfigurationFileFinding[];
+  /** Detected last, from the dependency manifests; sorted by name, empty when none were found. */
+  frameworks: FrameworkFinding[];
 }
 
 export interface LocationInspection {

@@ -5,6 +5,12 @@ import com.orbit.backend.dto.response.ProjectScanResponse;
 import com.orbit.backend.dto.response.ProjectScanResponse.BuildSystemFinding;
 import com.orbit.backend.dto.response.ProjectScanResponse.ConfigurationFileFinding;
 import com.orbit.backend.dto.response.ProjectScanResponse.Counts;
+import com.orbit.backend.dto.response.ProjectScanResponse.FrameworkEvidence;
+import com.orbit.backend.dto.response.ProjectScanResponse.FrameworkFinding;
+import com.orbit.backend.entity.Framework;
+import com.orbit.backend.entity.FrameworkDependency;
+import com.orbit.backend.entity.ProjectFrameworkDetail;
+import com.orbit.backend.entity.ProjectFrameworkEvidence;
 import com.orbit.backend.entity.ConfigurationFile;
 import com.orbit.backend.entity.ProjectConfigurationDetail;
 import com.orbit.backend.entity.BuildFileType;
@@ -21,6 +27,9 @@ import com.orbit.backend.exception.ErrorCode;
 import com.orbit.backend.repository.BuildFileTypeRepository;
 import com.orbit.backend.repository.ConfigurationFileRepository;
 import com.orbit.backend.repository.ProjectConfigurationDetailRepository;
+import com.orbit.backend.repository.FrameworkDependencyRepository;
+import com.orbit.backend.repository.ProjectFrameworkDetailRepository;
+import com.orbit.backend.repository.ProjectFrameworkEvidenceRepository;
 import com.orbit.backend.repository.LanguageExtensionRepository;
 import com.orbit.backend.repository.ProjectBuildDetailRepository;
 import com.orbit.backend.repository.ProjectBuildEvidenceRepository;
@@ -30,6 +39,7 @@ import com.orbit.backend.repository.ProjectScanRepository;
 import com.orbit.backend.scan.BuildSystemScanner;
 import com.orbit.backend.scan.ConfigFileScanner;
 import com.orbit.backend.scan.FileCounter;
+import com.orbit.backend.scan.FrameworkScanner;
 import com.orbit.backend.scan.LanguageScanner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +79,9 @@ public class ProjectScanService {
     private final ProjectBuildEvidenceRepository buildEvidenceRepository;
     private final ConfigurationFileRepository configurationFileRepository;
     private final ProjectConfigurationDetailRepository configurationDetailRepository;
+    private final FrameworkDependencyRepository frameworkDependencyRepository;
+    private final ProjectFrameworkDetailRepository frameworkDetailRepository;
+    private final ProjectFrameworkEvidenceRepository frameworkEvidenceRepository;
     private final ScanProgressTracker progressTracker;
     private final ProjectPathResolver pathResolver;
     private final ScanProperties scanProperties;
@@ -83,6 +96,9 @@ public class ProjectScanService {
                               ProjectBuildEvidenceRepository buildEvidenceRepository,
                               ConfigurationFileRepository configurationFileRepository,
                               ProjectConfigurationDetailRepository configurationDetailRepository,
+                              FrameworkDependencyRepository frameworkDependencyRepository,
+                              ProjectFrameworkDetailRepository frameworkDetailRepository,
+                              ProjectFrameworkEvidenceRepository frameworkEvidenceRepository,
                               ScanProgressTracker progressTracker,
                               ProjectPathResolver pathResolver,
                               ScanProperties scanProperties,
@@ -96,6 +112,9 @@ public class ProjectScanService {
         this.buildEvidenceRepository = buildEvidenceRepository;
         this.configurationFileRepository = configurationFileRepository;
         this.configurationDetailRepository = configurationDetailRepository;
+        this.frameworkDependencyRepository = frameworkDependencyRepository;
+        this.frameworkDetailRepository = frameworkDetailRepository;
+        this.frameworkEvidenceRepository = frameworkEvidenceRepository;
         this.progressTracker = progressTracker;
         this.pathResolver = pathResolver;
         this.scanProperties = scanProperties;
@@ -116,13 +135,37 @@ public class ProjectScanService {
                             .map(d -> new Counts(d.getLanguage().getLanguageName(), d.getNumberOfFiles(), d.getLinesOfCode()))
                             .toList();
                     return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts,
-                            storedBuildSystems(scan.getScanId()), storedConfigurationFiles(scan.getScanId()));
+                            storedBuildSystems(scan.getScanId()), storedConfigurationFiles(scan.getScanId()),
+                            storedFrameworks(scan.getScanId()));
                 });
     }
 
     /** How far the running scan of the project is (idle when none is running). */
     public ScanProgressTracker.Progress progress(UUID userId, UUID projectId) {
         return progressTracker.current(find(userId, projectId).getProjectId());
+    }
+
+    private List<FrameworkFinding> storedFrameworks(UUID scanId) {
+        Map<UUID, List<FrameworkEvidence>> evidence = new LinkedHashMap<>();
+        for (ProjectFrameworkEvidence e : frameworkEvidenceRepository.findByScanId(scanId)) {
+            evidence.computeIfAbsent(e.getFrameworkId(), k -> new ArrayList<>())
+                    .add(new FrameworkEvidence(e.getFilePath(), e.getLineNumber(), e.getColNumber(), e.getDependencyName()));
+        }
+        return frameworkDetailRepository.findByScanIdWithFramework(scanId).stream()
+                .map(d -> new FrameworkFinding(d.getFramework().getName(),
+                        sortedFrameworkEvidence(evidence.getOrDefault(d.getFramework().getFrameworkId(), List.of()))))
+                .toList();
+    }
+
+    /** Shallowest manifest first, then by position in the file. */
+    private static List<FrameworkEvidence> sortedFrameworkEvidence(List<FrameworkEvidence> list) {
+        return list.stream()
+                .sorted(java.util.Comparator
+                        .comparingInt((FrameworkEvidence e) -> (int) e.filePath().chars().filter(c -> c == '/').count())
+                        .thenComparing(FrameworkEvidence::filePath)
+                        .thenComparingInt(FrameworkEvidence::line)
+                        .thenComparingInt(FrameworkEvidence::column))
+                .toList();
     }
 
     private List<ConfigurationFileFinding> storedConfigurationFiles(UUID scanId) {
@@ -203,21 +246,38 @@ public class ProjectScanService {
             configurationFiles.putIfAbsent(c.getFileName(), c);
         }
 
+        // framework name -> entity, and the dependency catalog, both straight from the database
+        Map<String, Framework> frameworks = new LinkedHashMap<>();
+        List<FrameworkScanner.CatalogEntry> catalog = new ArrayList<>();
+        for (FrameworkDependency d : frameworkDependencyRepository.findAllWithFramework()) {
+            frameworks.putIfAbsent(d.getFramework().getName(), d.getFramework());
+            catalog.add(new FrameworkScanner.CatalogEntry(d.getFramework().getName(), d.getDependencyName(), d.getPackageManager()));
+        }
+
         ScanProgressTracker.Run run = progressTracker.start(project.getProjectId());
         LanguageScanner.Result result;
         BuildSystemScanner.Result builds;
         ConfigFileScanner.Result configs;
+        FrameworkScanner.Result frameworkResult;
         try {
-            // 1. count the files (so the progress bar knows its end), 2. languages, 3. build systems (after the languages)
+            // 1. count the files (so the progress bar knows its end), 2. languages, 3. build systems, 4. configuration
+            // files, 5. frameworks: the dependency manifests those two stages found are parsed and compared with the catalog
             run.stage(ScanProgressTracker.COUNTING, 0, 0, 1);
             int fileCount = FileCounter.count(folder, ignored);
-            run.stage(ScanProgressTracker.LANGUAGES, 0, 70, fileCount);
+            run.stage(ScanProgressTracker.LANGUAGES, 0, 60, fileCount);
             result = new LanguageScanner(languageByExtension, ignored, scanProperties.maxFileBytesOrDefault())
                     .scan(folder, run::fileVisited);
-            run.stage(ScanProgressTracker.BUILD_SYSTEMS, 70, 15, fileCount);
+            run.stage(ScanProgressTracker.BUILD_SYSTEMS, 60, 12, fileCount);
             builds = new BuildSystemScanner(buildSystemByFileType, ignored).scan(folder, run::fileVisited);
-            run.stage(ScanProgressTracker.CONFIGURATION, 85, 15, fileCount);
+            run.stage(ScanProgressTracker.CONFIGURATION, 72, 12, fileCount);
             configs = new ConfigFileScanner(configurationFiles.keySet(), ignored).scan(folder, run::fileVisited);
+            List<String> candidates = new ArrayList<>();
+            builds.evidenceByBuildSystem().values().forEach(candidates::addAll);
+            configs.locationsByFileName().values().forEach(candidates::addAll);
+            List<String> manifests = FrameworkScanner.manifestsAmong(candidates);
+            run.stage(ScanProgressTracker.FRAMEWORKS, 84, 16, manifests.size());
+            frameworkResult = new FrameworkScanner(catalog, scanProperties.maxFileBytesOrDefault())
+                    .scan(folder, manifests, run::fileVisited);
         } catch (IOException | RuntimeException e) {
             log.warn("Scan of {} failed: {}", folder, e.toString());
             throw new ApiException(ErrorCode.PROJECT_SCAN_FAILED);
@@ -256,8 +316,26 @@ public class ProjectScanService {
                 configFindings.add(new ConfigurationFileFinding(name, paths));
             });
             configurationDetailRepository.saveAll(configDetails);
+
+            List<ProjectFrameworkDetail> frameworkDetails = new ArrayList<>();
+            List<ProjectFrameworkEvidence> frameworkEvidence = new ArrayList<>();
+            List<FrameworkFinding> frameworkFindings = new ArrayList<>();
+            frameworkResult.evidenceByFramework().forEach((name, list) -> {
+                Framework framework = frameworks.get(name);
+                frameworkDetails.add(new ProjectFrameworkDetail(scan, framework));
+                List<FrameworkEvidence> shown = new ArrayList<>();
+                for (FrameworkScanner.Evidence e : list) {
+                    frameworkEvidence.add(new ProjectFrameworkEvidence(scan.getScanId(), framework.getFrameworkId(),
+                            e.dependency(), e.filePath(), e.line(), e.column()));
+                    shown.add(new FrameworkEvidence(e.filePath(), e.line(), e.column(), e.dependency()));
+                }
+                frameworkFindings.add(new FrameworkFinding(name, shown));
+            });
+            // the evidence rows reference their detail row, so the detail rows are written first
+            frameworkDetailRepository.saveAllAndFlush(frameworkDetails);
+            frameworkEvidenceRepository.saveAll(frameworkEvidence);
             return ProjectScanResponse.of(scan.getScanId(), project.getProjectId(), scan.getScannedAt(), counts, findings,
-                    configFindings);
+                    configFindings, frameworkFindings);
         });
         log.info("Scanned project {} ({}): {} files, {} lines, {} skipped", project.getProjectId(), folder,
                 response.totalFiles(), response.totalLines(), result.skippedFiles());

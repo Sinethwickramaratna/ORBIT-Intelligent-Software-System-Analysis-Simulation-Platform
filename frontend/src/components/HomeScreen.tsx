@@ -283,6 +283,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
             </div>
 
             {projects.length > 0 && <div className="section-label">Recent</div>}
+            <div className="project-list-wrap">
             <ul className="project-list">
               {visible.map((p) => (
                 <li key={p.projectId} className="project-item">
@@ -306,6 +307,17 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
                 </li>
               ))}
             </ul>
+            <button
+              type="button"
+              className="fab-new"
+              aria-label="Create new project"
+              title="Create new project"
+              tabIndex={tab}
+              onClick={() => setCreating(true)}
+            >
+              <PlusIcon />
+            </button>
+            </div>
 
             <div className="sidebar-user">
               <div className="avatar" aria-hidden="true">

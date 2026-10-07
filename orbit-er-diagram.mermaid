@@ -1,0 +1,120 @@
+---
+id: 9461b61f-acb9-450a-861f-776709ec713d
+---
+erDiagram
+    users {
+        UUID user_id PK
+        VARCHAR100 user_name UK
+        VARCHAR255 password "Argon2 hash"
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+    refresh_token_table {
+        UUID token_id PK
+        VARCHAR255 token UK "SHA-256 digest"
+        UUID user_id FK
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ expired_at
+    }
+    app_settings {
+        VARCHAR100 setting_key PK
+        VARCHAR500 setting_value
+        TIMESTAMPTZ updated_at
+    }
+    projects {
+        UUID project_id PK
+        VARCHAR150 project_name
+        VARCHAR1024 location "UK with user_id"
+        VARCHAR30 project_type "CHECK enum"
+        VARCHAR2000 description
+        UUID user_id FK
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+    project_scan {
+        UUID scan_id PK
+        UUID project_id FK
+        TIMESTAMPTZ scanned_at
+    }
+    language {
+        UUID language_id PK
+        VARCHAR100 language_name UK
+    }
+    language_extensions {
+        UUID extension_id PK
+        VARCHAR50 extension_type "UK with language_id"
+        UUID language_id FK
+    }
+    project_language_detail {
+        UUID scan_id PK, FK
+        UUID language_id PK, FK
+        INT lines_of_code
+        INT number_of_files
+    }
+    build_system {
+        UUID build_system_id PK
+        VARCHAR100 name UK
+    }
+    build_file_type {
+        UUID build_file_id PK
+        VARCHAR255 file_type UK
+        UUID build_system_id FK
+    }
+    project_build_detail {
+        UUID scan_id PK, FK
+        UUID build_system_id PK, FK
+    }
+    project_build_evidence {
+        UUID scan_id PK, FK
+        UUID build_system_id PK, FK
+        VARCHAR1000 file_path PK
+    }
+    configuration_file {
+        UUID configuration_file_id PK
+        VARCHAR255 file_name UK
+    }
+    project_configuration_detail {
+        UUID scan_id PK, FK
+        UUID configuration_file_id PK, FK
+        VARCHAR1000 file_path PK
+    }
+    framework {
+        UUID framework_id PK
+        VARCHAR100 name UK
+    }
+    framework_dependency {
+        UUID framework_dependency_id PK
+        UUID framework_id FK
+        VARCHAR255 dependency_name UK
+        VARCHAR50 package_manager
+    }
+    project_framework_detail {
+        UUID scan_id PK, FK
+        UUID framework_id PK, FK
+    }
+    project_framework_evidence {
+        UUID evidence_id PK
+        UUID scan_id FK
+        UUID framework_id FK
+        VARCHAR255 dependency_name
+        VARCHAR1000 file_path
+        INT line_number "CHECK >= 1"
+        INT col_number "CHECK >= 1"
+    }
+
+    users ||--o{ refresh_token_table : "has"
+    users ||--o{ projects : "owns"
+    projects ||--o{ project_scan : "scanned as"
+    language ||--o{ language_extensions : "has"
+    project_scan ||--o{ project_language_detail : "detects"
+    language ||--o{ project_language_detail : "counted in"
+    build_system ||--o{ build_file_type : "identified by"
+    project_scan ||--o{ project_build_detail : "detects"
+    build_system ||--o{ project_build_detail : "found in"
+    project_build_detail ||--o{ project_build_evidence : "backed by"
+    project_scan ||--o{ project_configuration_detail : "detects"
+    configuration_file ||--o{ project_configuration_detail : "found in"
+    framework ||--o{ framework_dependency : "identified by"
+    project_scan ||--o{ project_framework_detail : "detects"
+    framework ||--o{ project_framework_detail : "found in"
+    project_framework_detail ||--o{ project_framework_evidence : "backed by"

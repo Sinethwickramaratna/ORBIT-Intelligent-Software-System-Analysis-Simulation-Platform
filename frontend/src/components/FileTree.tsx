@@ -5,6 +5,7 @@ import { api, ApiError, type ProjectScan, type ScanProgress, type TreeEntry } fr
 import AnalysisPanel from "./AnalysisPanel";
 import BuildSystemPanel from "./BuildSystemPanel";
 import ConfigurationPanel from "./ConfigurationPanel";
+import FrameworkPanel from "./FrameworkPanel";
 import { usePanelResize } from "./usePanelResize";
 
 interface NodeState {
@@ -38,16 +39,20 @@ const ScanGlyph = () => (
   </svg>
 );
 
-/** Bottom windows of the Explorer: Analysis, Build System (shrinks to fit) and Configuration. */
+/** Bottom windows of the Explorer: Analysis, Build System (shrinks to fit), Configuration and Framework. */
 const PANEL_KEY = "orbit.analysis.height"; // the user drags the splitter above Analysis; the choice is remembered
 const PANEL_OPEN_KEY = "orbit.analysis.open"; // "0" = hidden (only its title bar remains), like a VS Code panel
 const BUILD_OPEN_KEY = "orbit.build.open"; // "0" = Build System window hidden
 const CONFIG_KEY = "orbit.config.height";
 const CONFIG_OPEN_KEY = "orbit.config.open"; // "0" = Configuration window hidden
-const PANEL_DEFAULT = 300;
+const FRAMEWORK_KEY = "orbit.framework.height";
+const FRAMEWORK_OPEN_KEY = "orbit.framework.open"; // "0" = Framework window hidden
+const PANEL_DEFAULT = 220;
 const PANEL_MIN = 96;
-const CONFIG_DEFAULT = 170;
+const CONFIG_DEFAULT = 130;
 const CONFIG_MIN = 80;
+const FRAMEWORK_DEFAULT = 150;
+const FRAMEWORK_MIN = 80;
 const TREE_MIN = 120; // the file tree always keeps at least this much room
 
 /**
@@ -69,6 +74,7 @@ export default function FileTree({ projectId, projectName }: { projectId: string
 
   const [panelOpen, setPanelOpen] = useState(true);
   const [configOpen, setConfigOpen] = useState(true);
+  const [frameworkOpen, setFrameworkOpen] = useState(true);
   const asideRef = useRef<HTMLElement>(null);
 
   const load = useCallback(
@@ -156,10 +162,10 @@ export default function FileTree({ projectId, projectName }: { projectId: string
   // ---- window heights: restore, clamp to the room available, drag with mouse/touch/keyboard ----
   const measure = (sel: string) => asideRef.current?.querySelector<HTMLElement>(sel)?.offsetHeight ?? 0;
   /** Room for the bottom windows: everything except the header, progress bar, project name, splitters and tree. */
-  const roomFor = (otherWindowSel: string) => {
+  const roomFor = (...otherWindowSels: string[]) => {
     const aside = asideRef.current;
     if (!aside) return 0;
-    const used = [".explorer-head", ".scan-progress", ".explorer-root", ".explorer-split", ".config-split", otherWindowSel].reduce(
+    const used = [".explorer-head", ".scan-progress", ".explorer-root", ".explorer-split", ".config-split", ".framework-split", ...otherWindowSels].reduce(
       (sum, sel) => sum + measure(sel),
       0,
     );
@@ -172,31 +178,41 @@ export default function FileTree({ projectId, projectName }: { projectId: string
     storageKey: PANEL_KEY,
     defaultHeight: PANEL_DEFAULT,
     min: PANEL_MIN,
-    getMax: () => roomFor(".config-wrap"),
+    getMax: () => roomFor(".config-wrap", ".framework-wrap"),
     hasRoom,
   });
   const config = usePanelResize({
     storageKey: CONFIG_KEY,
     defaultHeight: CONFIG_DEFAULT,
     min: CONFIG_MIN,
-    getMax: () => roomFor(".analysis-wrap"),
+    getMax: () => roomFor(".analysis-wrap", ".framework-wrap"),
+    hasRoom,
+  });
+  const framework = usePanelResize({
+    storageKey: FRAMEWORK_KEY,
+    defaultHeight: FRAMEWORK_DEFAULT,
+    min: FRAMEWORK_MIN,
+    getMax: () => roomFor(".analysis-wrap", ".config-wrap"),
     hasRoom,
   });
   const { restore: restoreAnalysis, reclamp: reclampAnalysis } = analysis;
   const { restore: restoreConfig, reclamp: reclampConfig } = config;
+  const { restore: restoreFramework, reclamp: reclampFramework } = framework;
 
   useEffect(() => {
     restoreAnalysis();
     restoreConfig();
+    restoreFramework();
     const el = asideRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       reclampAnalysis();
       reclampConfig();
+      reclampFramework();
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [restoreAnalysis, restoreConfig, reclampAnalysis, reclampConfig]);
+  }, [restoreAnalysis, restoreConfig, restoreFramework, reclampAnalysis, reclampConfig, reclampFramework]);
 
   // restore whether the Analysis window was hidden
   useEffect(() => {
@@ -264,6 +280,24 @@ export default function FileTree({ projectId, projectName }: { projectId: string
       /* the choice just is not remembered */
     }
   }, [configOpen]);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(FRAMEWORK_OPEN_KEY) === "0") setFrameworkOpen(false);
+    } catch {
+      /* stays open */
+    }
+  }, []);
+
+  const toggleFramework = useCallback(() => {
+    const next = !frameworkOpen;
+    setFrameworkOpen(next);
+    try {
+      localStorage.setItem(FRAMEWORK_OPEN_KEY, next ? "1" : "0");
+    } catch {
+      /* the choice just is not remembered */
+    }
+  }, [frameworkOpen]);
 
   function toggle(entry: TreeEntry) {
     setSelected(entry.path);
@@ -356,6 +390,10 @@ export default function FileTree({ projectId, projectName }: { projectId: string
       {configOpen && <div className="config-split" {...config.splitterProps("Resize the configuration window")} />}
       <div className={`config-wrap${configOpen ? "" : " collapsed"}`} style={configOpen ? { height: config.height } : undefined}>
         <ConfigurationPanel scan={scan} loading={scanLoading} scanning={scanning} open={configOpen} onToggle={toggleConfig} />
+      </div>
+      {frameworkOpen && <div className="framework-split" {...framework.splitterProps("Resize the framework window")} />}
+      <div className={`framework-wrap${frameworkOpen ? "" : " collapsed"}`} style={frameworkOpen ? { height: framework.height } : undefined}>
+        <FrameworkPanel scan={scan} loading={scanLoading} scanning={scanning} open={frameworkOpen} onToggle={toggleFramework} />
       </div>
     </aside>
   );

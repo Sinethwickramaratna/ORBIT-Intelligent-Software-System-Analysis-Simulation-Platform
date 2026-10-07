@@ -76,6 +76,7 @@ graphify-out/
 _to_delete/
 backups/
 _claude_scratch/
+claude outputs/
 
 # ---- ORBIT runtime folders ----
 # default projects folder and placeholder for unused mounts (see ORBIT_MOUNT_n in .env.example)
