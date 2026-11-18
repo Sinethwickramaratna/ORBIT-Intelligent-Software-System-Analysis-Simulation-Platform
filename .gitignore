@@ -8,6 +8,8 @@
 node_modules/
 .next/
 frontend/out/
+# copied from node_modules/monaco-editor by `npm run dev|build` (scripts/copy-monaco.mjs)
+frontend/public/monaco/
 frontend/coverage/
 frontend/next-env.d.ts
 *.tsbuildinfo

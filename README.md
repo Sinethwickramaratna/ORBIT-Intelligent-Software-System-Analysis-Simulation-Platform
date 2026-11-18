@@ -5,7 +5,7 @@ ORBIT registers software projects (a folder on your disk or a cloned public Git 
 have - every finding with the evidence that proves it. Next.js frontend · Spring Boot 4 backend · PostgreSQL in Docker.
 
 Implemented so far: first-run setup, login (JWT + refresh tokens), projects (create / clone / open / delete), a file
-explorer, the project scan with its four result windows and the dependency check + one-click dependency setup
+explorer with a code editor (open, edit, `Ctrl+S` save; new file / folder, rename, delete), the project scan with its four result windows and the dependency check + one-click dependency setup
 (Architecture Reconstruction, step 1). `llm-service/` and `ml-service/` are reserved for later phases.
 
 ```
@@ -81,12 +81,26 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
    runs by itself when the project is added; press **Dependency Check** to run it again. When something is missing, press
    **Setup Dependencies**, confirm, and ORBIT downloads everything into the project folder - the red X turns into the green
    check when it is done (see *Dependency check and setup*).
-7. **Scan again:** after the folder changed, press **Scan** in the Explorer; a progress bar shows how far it is.
-8. **Delete a project:** the three dots next to a project -> **Delete**, then type its name. This removes it from ORBIT
+7. **Edit files (like an IDE):** click a file in the Explorer and it opens in a tab in the middle (line numbers, Tab /
+   Shift+Tab indent, Enter keeps the indentation, browser Undo/Redo). A dot on the tab means unsaved changes; press
+   **Ctrl+S** (Cmd+S on macOS) to save it to disk. Closing a modified tab asks *Save / Don't Save / Cancel*; if another
+   program changed the file meanwhile, ORBIT asks before overwriting it. Only UTF-8 text files up to 5 MB open in the
+   editor (binary files are refused, so they can never be damaged); line endings (LF / CRLF) and a BOM are kept.
+   The project tab (first tab) shows the Architecture view again.
+8. **New File / New Folder, Rename, Delete:** the two icons at the right end of the project-name row in the Explorer
+   create a **New File** or **New Folder** - inside the selected folder, next to the selected file, or in the project
+   root when nothing is selected (click empty space to clear the selection). Like Visual Studio, the item is created
+   at once as `NewFile1.txt` / `NewFolder1` with its name ready to edit: type a name and press Enter (Escape keeps the
+   default). **Right-click** gives the same in a menu: on a folder, New File / New Folder go *inside* that folder; on a
+   file, next to it; on empty space below the files (or on the project name), into the project root. Right-clicking a
+   file or folder also offers **Rename** (`F2`) and **Delete** (`Delete` key; it asks first and removes it from disk,
+   folders with everything in them). Open tabs follow renamed files and folders.
+9. **Scan again:** after the folder changed, press **Scan** in the Explorer; a progress bar shows how far it is.
+10. **Delete a project:** the three dots next to a project -> **Delete**, then type its name. This removes it from ORBIT
    only - the files on disk are kept.
-9. **Add or change drives later:** gear icon in the Projects panel -> **Settings** -> edit the folders -> **Save**, then
+11. **Add or change drives later:** gear icon in the Projects panel -> **Settings** -> edit the folders -> **Save**, then
    ORBIT applies it by itself (the small ORBIT helper window that `start.cmd` opens does this).
-10. **Stop / reset:** `docker compose down` stops everything and keeps your data; see *Database persistence* to start from zero.
+12. **Stop / reset:** `docker compose down` stops everything and keeps your data; see *Database persistence* to start from zero.
 
 ## Project analysis
 
@@ -301,6 +315,13 @@ Protected (`Authorization: Bearer <access token>`): `POST /api/auth/logout`, `GE
 `GET|PUT|DELETE /api/users/{id}` (update/delete: own account only).
 Projects (own projects only): `GET|POST /api/projects`, `GET /api/projects/config`, `GET /api/projects/inspect?location=`,
 `GET /api/projects/{id}`, `GET /api/projects/{id}/tree?path=` (one folder level, lazily),
+Files (paths relative to the project root; nothing outside it, nothing in `.git`): `GET /api/projects/{id}/file?path=`
+(open a UTF-8 text file: `{path, name, content, size, lastModified, bom, lineEnding}`; `415 FILE_NOT_TEXT` for binary /
+non-UTF-8, `413 FILE_TOO_LARGE` above 5 MB), `PUT /api/projects/{id}/file` `{path, content, bom, expectedLastModified?}`
+(save, `Ctrl+S`; `409 FILE_CHANGED_ON_DISK` when the file changed since `expectedLastModified`),
+`POST /api/projects/{id}/files` `{parent, name, kind: FILE|FOLDER}` (New File / New Folder; `409 FILE_ALREADY_EXISTS`,
+`400 FILE_NAME_INVALID`), `POST /api/projects/{id}/files/rename` `{path, newName}` (Rename, stays in its folder) and
+`DELETE /api/projects/{id}/files?path=` (Delete a file, or a folder with everything in it; the project root cannot be deleted),
 `GET /api/projects/browse?path=` and `POST /api/projects/browse/folder` (folder chooser: only the mounted folders in Docker),
 `DELETE /api/projects/{id}?confirmName=` (removes it from ORBIT; files on disk are kept),
 `GET|PUT /api/settings/folders` (the drives/folders ORBIT may open).
@@ -334,7 +355,8 @@ Errors are JSON: `{timestamp,status,code,message,path,fieldErrors?}` — e.g. `U
 
 * unit tests for every scanner (`LanguageScanner`, `LineCounter`, `BuildSystemScanner`, `ConfigFileScanner`,
   `DependencyReader`, `FrameworkScanner`) and the services (setup / `.env`, folder browse and settings, path
-  resolution, project files, git init and clone);
+  resolution, project files - listing, open / save, New File / New Folder, Rename, Delete and the path / name checks -,
+  git init and clone);
 * the dependency check of every ecosystem (`DependencyCheckerTest`) and the version-range rules of npm/pub, PEP 440 and
   NuGet (`SemverTest`, `Pep440Test`, `NuGetVersionTest`);
 * integration tests for the whole authentication flow, the project API and the dependency API

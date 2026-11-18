@@ -188,15 +188,26 @@
 .project-tab { transition: margin-left .2s ease; }
 /* Sidebar hidden: the show button floats at the top-left, so move the project tab clear of it */
 @media (min-width: 761px) {
-  .workbench-body.sidebar-hidden .project-tab { margin-left: 40px; border-left: 1px solid var(--border); }
+  .workbench-body.sidebar-hidden .editor-tabs { padding-left: 40px; }
+  .workbench-body.sidebar-hidden .project-tab { border-left: 1px solid var(--border); }
 }
 .project-tab-name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icon-btn.small { width: 20px; height: 20px; border-color: transparent; border-radius: 3px; }
 
 .explorer { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); }
 .explorer-head { padding: 12px 14px 8px 16px; }
-.explorer-root { padding: 4px 16px 6px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree { flex: 1; min-height: 120px; overflow: auto; padding: 2px 0 12px; font-size: 13px; scrollbar-width: thin; }
+.explorer-root { display: flex; align-items: center; gap: 6px; padding: 2px 8px 4px 16px; font-size: 13px; font-weight: 600; }
+.explorer-root-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* New File / New Folder: right corner of the project-name row, like the VS Code Explorer title actions */
+.explorer-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.explorer-action {
+  width: 24px; height: 24px; display: grid; place-items: center; padding: 0; cursor: pointer;
+  color: var(--muted); background: transparent; border: 0; border-radius: 4px;
+}
+.explorer-action:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+.explorer-action:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* the list always ends in an empty strip: right-click there = New File / New Folder in the project root */
+.tree { flex: 1; min-height: 120px; overflow: auto; padding: 2px 0 32px; font-size: 13px; scrollbar-width: thin; }
 .tree-row { display: flex; align-items: center; gap: 4px; height: 24px; padding-right: 10px; cursor: pointer; color: var(--text); white-space: nowrap; }
 .tree-row:hover { background: var(--surface-2); }
 .tree-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -701,3 +712,89 @@
 .dep-change-from { text-decoration: line-through; color: var(--muted); }
 .dep-change-to { color: var(--dep-ok); font-weight: 600; }
 .dep-change-why { display: block; font-size: 11.5px; color: var(--muted); }
+
+/* ---------- Explorer: rename in place, context menu ---------- */
+.tree-row.active-file .tree-name { color: var(--accent); }
+.tree-row.renaming { height: auto; min-height: 24px; align-items: flex-start; cursor: default; background: transparent; }
+.tree-row.renaming .tree-twist, .tree-row.renaming .tree-icon { height: 24px; align-items: center; }
+.tree-rename { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 1px 0; }
+.tree-rename-input {
+  width: 100%; min-width: 0; height: 22px; padding: 0 4px; font: inherit; font-size: 13px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--accent); border-radius: 2px; outline: none;
+}
+.tree-rename-input.invalid { border-color: var(--danger); }
+.tree-rename-error {
+  margin-top: 2px; padding: 3px 6px; font-size: 12px; line-height: 1.35; white-space: normal; color: #fff;
+  background: var(--danger); border-radius: 2px;
+}
+.tree-op-error { display: flex; align-items: center; gap: 6px; justify-content: space-between; padding: 4px 8px 4px 16px; }
+.ctx-menu {
+  position: fixed; z-index: 60; min-width: 220px; padding: 4px; display: flex; flex-direction: column;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, .55); font-size: 13px; outline: none;
+}
+.ctx-item {
+  display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px 0 6px; font: inherit; text-align: left;
+  color: inherit; background: transparent; border: 0; border-radius: 4px; cursor: pointer; white-space: nowrap;
+}
+.ctx-item.active { color: var(--on-accent); background: var(--accent); }
+.ctx-item.danger.active { color: #fff; background: var(--danger); }
+.ctx-icon { width: 16px; flex: none; display: grid; place-items: center; }
+.ctx-label { flex: 1; }
+.ctx-shortcut { margin-left: 24px; font-size: 12px; opacity: .7; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.modal.jb-modal.confirm-modal { width: min(460px, 100%); }
+.confirm-body .confirm-lead { margin: 0 0 8px; line-height: 1.5; }
+.confirm-body .hint { margin: 0 0 14px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.confirm-body code { word-break: break-all; }
+
+/* ---------- editor tabs + code editor (middle of the project view) ---------- */
+.editor-tabs {
+  flex: none; display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  background: var(--surface); border-bottom: 1px solid var(--border); transition: padding-left .2s ease;
+}
+.editor-tabs .project-tab { border-bottom: 0; border-top: 0; flex: none; cursor: pointer; }
+.editor-tab { position: relative; }
+.editor-tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
+.editor-tab:not(.active) { color: var(--muted); }
+.editor-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.editor-tab.file {
+  flex: none; height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 12px; font-size: 13px;
+  cursor: pointer; border-right: 1px solid var(--border); max-width: 240px;
+}
+.editor-tab.file:hover { background: var(--surface-2); }
+.editor-tab.file.active { background: var(--bg); color: var(--text); }
+.editor-tab-icon { display: grid; color: var(--muted); }
+.editor-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-tab-close {
+  width: 20px; height: 20px; flex: none; display: grid; place-items: center; padding: 0; cursor: pointer;
+  color: inherit; background: transparent; border: 0; border-radius: 3px;
+}
+.editor-tab-close > * { grid-area: 1 / 1; }
+.editor-tab-close svg { opacity: 0; }
+.editor-tab.active .editor-tab-close svg, .editor-tab:hover .editor-tab-close svg, .editor-tab-close:focus-visible svg { opacity: 1; }
+.editor-tab-close:hover { background: color-mix(in srgb, var(--text) 14%, transparent); }
+.dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: 0; }
+.editor-tab.dirty .dirty-dot { opacity: 1; }
+.editor-tab.dirty:hover .dirty-dot, .editor-tab.dirty .editor-tab-close:focus-visible .dirty-dot { opacity: 0; }
+.editor-tab.dirty:not(:hover) .editor-tab-close svg { opacity: 0; }
+
+.editor-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.editor-crumbs {
+  flex: none; display: flex; align-items: center; gap: 4px; padding: 4px 16px; font-size: 12px; color: var(--muted);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.editor-crumbs .crumb:not(.last)::after { content: "›"; margin-left: 4px; opacity: .7; }
+.editor-crumbs .crumb.last { color: var(--text); }
+.editor-note { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 28px; color: var(--muted); font-size: 13px; }
+.editor-note.error strong { color: var(--text); }
+/* Monaco fills the pane; it sizes itself (automaticLayout) to this box */
+.code-editor { flex: 1; min-height: 0; min-width: 0; position: relative; overflow: hidden; border-top: 1px solid var(--border); }
+.code-editor > section { position: absolute !important; inset: 0; }
+.editor-status-lang { color: var(--text); }
+.editor-status {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 24px; padding: 0 12px;
+  font-size: 12px; color: var(--muted); background: var(--surface); border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden;
+}
+.editor-status-right { display: flex; gap: 16px; }
+.editor-status-error { color: var(--danger); overflow: hidden; text-overflow: ellipsis; }

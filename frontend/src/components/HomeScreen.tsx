@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type FolderSettings, type Project, type User } from "@/lib/api";
 import SettingsDialog from "./SettingsDialog";
 import ApplyFallback from "./ApplyFallback";
@@ -9,11 +9,10 @@ import ProjectDialog from "./ProjectDialog";
 import CloneDialog from "./CloneDialog";
 import ProjectMenu from "./ProjectMenu";
 import DeleteProjectDialog from "./DeleteProjectDialog";
-import FileTree from "./FileTree";
+import ProjectWorkspace from "./ProjectWorkspace";
 import DependencyToolbar from "./DependencyToolbar";
 import DependencySetupDialog from "./DependencySetupDialog";
 import DependencyProgressDialog from "./DependencyProgressDialog";
-import ArchitecturePanel from "./ArchitecturePanel";
 import { useDependencies } from "@/lib/useDependencies";
 
 /**
@@ -119,7 +118,13 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
   const [stored, setStored] = useState<StoredProject | null>(() => readStoredProject());
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const activeId = stored?.projectId ?? null;
-  function setActiveId(id: string | null) {
+  // the editor reports unsaved changes; switching or closing the project asks first
+  const editorDirty = useRef(false);
+  const onDirtyChange = useCallback((dirty: boolean) => {
+    editorDirty.current = dirty;
+  }, []);
+  function setActiveId(id: string | null, force = false) {
+    if (!force && id !== activeId && editorDirty.current && !window.confirm("You have unsaved changes in open files. Discard them?")) return;
     const p = id ? projects.find((x) => x.projectId === id) : null;
     const next = p ? { projectId: p.projectId, projectName: p.projectName, location: p.location } : null;
     setStored(next);
@@ -175,7 +180,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
 
   function onDeleted(projectId: string) {
     setProjects((list) => list.filter((p) => p.projectId !== projectId));
-    if (activeId === projectId) setActiveId(null);
+    if (activeId === projectId) setActiveId(null, true);
     setDeleting(null);
   }
 
@@ -347,18 +352,13 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
         </aside>
 
         {active ? (
-          <div className="project-view">
-            <main className="project-middle" aria-label={`${active.projectName} workspace`}>
-              <div className="project-tab">
-                <span className="project-tab-name" title={active.createdAt ? `${active.location}\nCreated ${new Date(active.createdAt).toLocaleString()}` : active.location}>{active.projectName}</span>
-                <button type="button" className="icon-btn small" aria-label="Close project" title="Close project" onClick={() => setActiveId(null)}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-                </button>
-              </div>
-              <ArchitecturePanel dep={dependencies} />
-            </main>
-            <FileTree projectId={active.projectId} projectName={active.projectName} />
-          </div>
+          <ProjectWorkspace
+            key={active.projectId}
+            project={active}
+            dependencies={dependencies}
+            onCloseProject={() => setActiveId(null)}
+            onDirtyChange={onDirtyChange}
+          />
         ) : (
         <main className="dashboard">
           <div className="dashboard-inner">
