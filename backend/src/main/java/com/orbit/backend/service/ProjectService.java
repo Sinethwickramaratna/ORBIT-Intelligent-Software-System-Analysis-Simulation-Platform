@@ -6,6 +6,7 @@ import com.orbit.backend.dto.request.CreateProjectRequest;
 import com.orbit.backend.dto.request.RenameEntryRequest;
 import com.orbit.backend.dto.request.SaveFileRequest;
 import com.orbit.backend.dto.response.FileContentResponse;
+import com.orbit.backend.dto.response.TerminalTicketResponse;
 import com.orbit.backend.dto.response.ProjectConfigResponse;
 import com.orbit.backend.dto.response.ProjectInspectResponse;
 import com.orbit.backend.dto.response.ProjectResponse;
@@ -43,6 +44,7 @@ public class ProjectService {
     private final GitCloneService cloneService;
     private final ProjectScanService scanService;
     private final ProjectDependencyService dependencyService;
+    private final TerminalTicketService terminalTicketService;
 
     public ProjectResponse create(UUID userId, CreateProjectRequest request) {
         String name = request.projectName().trim();
@@ -204,6 +206,18 @@ public class ProjectService {
     public ProjectTreeResponse tree(UUID userId, UUID projectId, String relativePath) {
         Project project = find(userId, projectId);
         return fileService.list(pathResolver.resolve(project.getLocation()).path(), relativePath);
+    }
+
+    /**
+     * A one-time ticket for the terminal helper on the user's computer: only for the owner's project, and only while
+     * the project folder exists. The terminal starts in that folder.
+     */
+    public TerminalTicketResponse terminalTicket(UUID userId, UUID projectId) {
+        Project project = find(userId, projectId);
+        if (!Files.isDirectory(pathResolver.resolve(project.getLocation()).path())) {
+            throw new ApiException(ErrorCode.PROJECT_FOLDER_UNAVAILABLE, "The project folder no longer exists");
+        }
+        return terminalTicketService.issue(userId, project.getLocation());
     }
 
     public FileContentResponse readFile(UUID userId, UUID projectId, String relativePath) {

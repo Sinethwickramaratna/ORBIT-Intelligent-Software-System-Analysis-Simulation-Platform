@@ -16,6 +16,7 @@ import com.orbit.backend.dto.response.ProjectResponse;
 import com.orbit.backend.dto.response.ProjectScanResponse;
 import com.orbit.backend.dto.response.ProjectTreeResponse;
 import com.orbit.backend.dto.response.RepositoryInspectResponse;
+import com.orbit.backend.dto.response.TerminalTicketResponse;
 import com.orbit.backend.entity.AuthenticatedUser;
 import com.orbit.backend.service.ProjectScanService;
 import com.orbit.backend.service.ScanProgressTracker;
@@ -111,6 +112,13 @@ public class ProjectController {
                                     @RequestParam(name = "path", required = false, defaultValue = "") String path,
                                     @AuthenticationPrincipal AuthenticatedUser principal) {
         return projectService.tree(principal.userId(), projectId, path);
+    }
+
+    /** One-time ticket for the ORBIT terminal helper (terminal in the project folder, on the user's computer). */
+    @PostMapping("/{projectId}/terminal/ticket")
+    public TerminalTicketResponse terminalTicket(@PathVariable UUID projectId,
+                                                 @AuthenticationPrincipal AuthenticatedUser principal) {
+        return projectService.terminalTicket(principal.userId(), projectId);
     }
 
     /** Opens a text file for the editor ({@code path} relative to the project root). */

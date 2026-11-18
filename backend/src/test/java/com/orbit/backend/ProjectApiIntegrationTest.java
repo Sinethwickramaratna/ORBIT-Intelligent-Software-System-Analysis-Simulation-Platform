@@ -271,6 +271,30 @@ class ProjectApiIntegrationTest {
     }
 
     @Test
+    void terminalTicketOnlyForTheOwnerAndStartsInTheProjectFolder() throws Exception {
+        String token = login("terminal-user");
+        String other = login("terminal-intruder");
+        Path folder = workspace.resolve("terminal-app");
+        Files.createDirectories(folder);
+        JsonNode project = body(send(post("/api/projects"), newProject("Term", folder, "OTHER", false), token)
+                .andExpect(status().isCreated()));
+        String id = project.get("projectId").textValue();
+        String ticketUrl = "/api/projects/" + id + "/terminal/ticket";
+
+        JsonNode ticket = body(send(post(ticketUrl), null, token).andExpect(status().isOk()));
+        assertThat(ticket.get("ticket").textValue()).matches("[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{43}");
+        assertThat(ticket.get("cwd").textValue()).isEqualTo(project.get("location").textValue());
+        assertThat(ticket.get("expiresAt").asLong()).isGreaterThan(System.currentTimeMillis());
+
+        send(post(ticketUrl), null, other).andExpect(status().isNotFound());
+        mvc.perform(post(ticketUrl)).andExpect(status().isUnauthorized());
+
+        Files.delete(folder);
+        send(post(ticketUrl), null, token).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PROJECT_FOLDER_UNAVAILABLE"));
+    }
+
+    @Test
     void createRenameDeleteFilesAndFoldersThroughTheApi() throws Exception {
         String token = login("explorer-user");
         Path folder = workspace.resolve("explorer-app");

@@ -5,7 +5,8 @@ ORBIT registers software projects (a folder on your disk or a cloned public Git 
 have - every finding with the evidence that proves it. Next.js frontend · Spring Boot 4 backend · PostgreSQL in Docker.
 
 Implemented so far: first-run setup, login (JWT + refresh tokens), projects (create / clone / open / delete), a file
-explorer with a code editor (open, edit, `Ctrl+S` save; new file / folder, rename, delete), the project scan with its four result windows and the dependency check + one-click dependency setup
+explorer with a code editor (VS Code's Monaco editor with VS Code-style syntax highlighting; open, edit, `Ctrl+S`
+save; new file / folder, rename, delete), the project scan with its four result windows and the dependency check + one-click dependency setup
 (Architecture Reconstruction, step 1). `llm-service/` and `ml-service/` are reserved for later phases.
 
 ```
@@ -81,8 +82,17 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
    runs by itself when the project is added; press **Dependency Check** to run it again. When something is missing, press
    **Setup Dependencies**, confirm, and ORBIT downloads everything into the project folder - the red X turns into the green
    check when it is done (see *Dependency check and setup*).
-7. **Edit files (like an IDE):** click a file in the Explorer and it opens in a tab in the middle (line numbers, Tab /
-   Shift+Tab indent, Enter keeps the indentation, browser Undo/Redo). A dot on the tab means unsaved changes; press
+7. **Edit files (like an IDE):** click a file in the Explorer and it opens in a tab in the middle, in **Monaco** - the
+   editor VS Code is built on (line numbers, minimap, find/replace `Ctrl+F` / `Ctrl+H`, multi-cursor, auto-closing
+   brackets, bracket-pair colours, indentation guides, Undo/Redo). **Syntax highlighting** works like VS Code: the
+   colours come from **Shiki**, which uses the TextMate grammars and colour themes of VS Code's own language
+   extensions, for 340+ languages (TypeScript, JavaScript, Python, Java, C#, C/C++, Go, Rust, Kotlin, PHP, Ruby, HTML,
+   CSS/SCSS, JSON, YAML, XML, Markdown, SQL, shell, PowerShell, Dockerfile, Makefile, ...). The language is picked
+   from the file name (shown in the status bar); a grammar is downloaded from ORBIT itself the first time a file of
+   that language is opened. The editor colours follow the ORBIT theme (Settings): ORBIT Dark/Light use VS Code
+   Dark+/Light+ colours, and Dark+, Light+, Monokai, Solarized and High Contrast use those VS Code themes. Everything
+   is served by ORBIT (`npm run dev|build` copies Monaco into `frontend/public/monaco`), so it works offline and in
+   Docker without any CDN. A dot on the tab means unsaved changes; press
    **Ctrl+S** (Cmd+S on macOS) to save it to disk. Closing a modified tab asks *Save / Don't Save / Cancel*; if another
    program changed the file meanwhile, ORBIT asks before overwriting it. Only UTF-8 text files up to 5 MB open in the
    editor (binary files are refused, so they can never be damaged); line endings (LF / CRLF) and a BOM are kept.

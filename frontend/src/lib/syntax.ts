@@ -111,8 +111,23 @@ export function applyEditorTheme(monaco: Monaco, appTheme: string | null | undef
   if (original) monaco.editor.setTheme(currentTheme);
 }
 
+let eolHooked = false;
+
+/**
+ * Editor text always uses LF: the app normalises files to LF when opening them and writes the file's own line ending
+ * (LF or CRLF) back when saving. Without this, Monaco gives new / one-line files the OS line ending (CRLF on Windows).
+ */
+function forceLfModels(monaco: Monaco): void {
+  if (eolHooked) return;
+  eolHooked = true;
+  const lf = monaco.editor.EndOfLineSequence.LF;
+  monaco.editor.getModels().forEach((m: { setEOL: (eol: number) => void }) => m.setEOL(lf));
+  monaco.editor.onDidCreateModel((m: { setEOL: (eol: number) => void }) => m.setEOL(lf));
+}
+
 /** Quietens language services that cannot know the project (no node_modules types, comments in tsconfig.json). */
 export function configureLanguageServices(monaco: Monaco): void {
+  forceLfModels(monaco);
   // Monaco 0.5x moved these namespaces; support both places
   type Defaults = { setDiagnosticsOptions?: (options: object) => void };
   type Namespace = Record<string, Defaults | undefined>;

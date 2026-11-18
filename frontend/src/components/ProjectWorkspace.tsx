@@ -5,7 +5,7 @@ import { api, ApiError } from "@/lib/api";
 import type { Dependencies } from "@/lib/useDependencies";
 import ArchitecturePanel from "./ArchitecturePanel";
 import { languageForPath, languageName } from "@/lib/languages";
-import CodeEditor, { disposeModel, modelPath } from "./CodeEditor";
+import CodeEditor, { disposeModel, modelPath, readModelText, takeModelText } from "./CodeEditor";
 import ConfirmDialog from "./ConfirmDialog";
 import FileTree from "./FileTree";
 
@@ -18,6 +18,8 @@ export interface WorkspaceProject {
 
 /** One open editor tab. `original` is the text as last loaded/saved (line endings normalised to \n). */
 interface OpenFile {
+  /** Stable for the life of the tab (the path changes when the file or a parent folder is renamed). */
+  id: number;
   path: string;
   name: string;
   value: string;
@@ -29,6 +31,8 @@ interface OpenFile {
   saving: boolean;
   error: string | null;
   saveError: string | null;
+  /** Goes up every time the text is (re)loaded from disk; tells the editor to take the new text. */
+  revision: number;
 }
 
 type Pending =
@@ -75,9 +79,11 @@ export default function ProjectWorkspace({
   const [pending, setPending] = useState<Pending>(null);
   const filesRef = useRef(files);
   filesRef.current = files;
+  const nextId = useRef(0);
 
-  const patch = useCallback((path: string, change: Partial<OpenFile>) => {
-    setFiles((fs) => fs.map((f) => (f.path === path ? { ...f, ...change } : f)));
+  /** Updates a tab by its id, so results that arrive after a rename (typing, save, load) still land on it. */
+  const patch = useCallback((id: number, change: Partial<OpenFile>) => {
+    setFiles((fs) => fs.map((f) => (f.id === id ? { ...f, ...change } : f)));
   }, []);
 
   const anyDirty = files.some(isDirty);
@@ -98,13 +104,19 @@ export default function ProjectWorkspace({
   }, [anyDirty]);
 
   const load = useCallback(
-    async (path: string) => {
+    async (id: number, path: string) => {
       try {
         const f = await api.readFile(projectId, path);
         const text = normalise(f.content ?? "");
-        patch(path, { value: text, original: text, lastModified: f.lastModified, bom: f.bom, lineEnding: f.lineEnding, loading: false, error: null, saveError: null });
+        setFiles((fs) =>
+          fs.map((x) =>
+            x.id === id
+              ? { ...x, value: text, original: text, lastModified: f.lastModified, bom: f.bom, lineEnding: f.lineEnding, loading: false, error: null, saveError: null, revision: x.revision + 1 }
+              : x,
+          ),
+        );
       } catch (e) {
-        patch(path, { loading: false, error: e instanceof Error ? e.message : "The file could not be opened." });
+        patch(id, { loading: false, error: e instanceof Error ? e.message : "The file could not be opened." });
       }
     },
     [projectId, patch],
@@ -115,11 +127,12 @@ export default function ProjectWorkspace({
       setActivePath(path);
       setCursor({ line: 1, column: 1 });
       if (filesRef.current.some((f) => f.path === path)) return;
+      const id = ++nextId.current;
       setFiles((fs) => [
         ...fs,
-        { path, name: nameOf(path), value: "", original: "", lastModified: 0, bom: false, lineEnding: "LF", loading: true, saving: false, error: null, saveError: null },
+        { id, path, name: nameOf(path), value: "", original: "", lastModified: 0, bom: false, lineEnding: "LF", loading: true, saving: false, error: null, saveError: null, revision: 0 },
       ]);
-      load(path);
+      load(id, path);
     },
     [load],
   );
@@ -128,8 +141,10 @@ export default function ProjectWorkspace({
     async (path: string, overwrite = false): Promise<boolean> => {
       const f = filesRef.current.find((x) => x.path === path);
       if (!f || f.loading || f.error || f.saving) return false;
-      const sent = f.value;
-      patch(path, { saving: true, saveError: null });
+      const { id } = f;
+      // the editor's own text: it already has keystrokes that React state may not have yet
+      const sent = readModelText(modelPath(projectId, f.path)) ?? f.value;
+      patch(id, { saving: true, saveError: null, value: sent });
       try {
         const res = await api.saveFile(projectId, {
           path,
@@ -138,14 +153,14 @@ export default function ProjectWorkspace({
           expectedLastModified: overwrite ? null : f.lastModified,
         });
         // keep whatever was typed while the save was running: only `sent` is now on disk
-        patch(path, { saving: false, original: sent, lastModified: res.lastModified });
+        patch(id, { saving: false, original: sent, lastModified: res.lastModified });
         return true;
       } catch (e) {
         if (e instanceof ApiError && e.code === "FILE_CHANGED_ON_DISK") {
-          patch(path, { saving: false });
+          patch(id, { saving: false });
           setPending({ kind: "conflict", path });
         } else {
-          patch(path, { saving: false, saveError: e instanceof Error ? e.message : "The file could not be saved." });
+          patch(id, { saving: false, saveError: e instanceof Error ? e.message : "The file could not be saved." });
         }
         return false;
       }
@@ -190,8 +205,17 @@ export default function ProjectWorkspace({
   const onRenamed = useCallback(
     (from: string, to: string) => {
       const move = (p: string) => (p === from ? to : p.startsWith(from + "/") ? to + p.slice(from.length) : p);
-      filesRef.current.filter((f) => move(f.path) !== f.path).forEach((f) => disposeModel(modelPath(projectId, f.path)));
-      setFiles((fs) => fs.map((f) => ({ ...f, path: move(f.path), name: nameOf(move(f.path)) })));
+      // the editor's own text is the newest (it may hold keystrokes React has not seen yet): carry it to the new path
+      const latest = new Map<number, string>();
+      filesRef.current
+        .filter((f) => move(f.path) !== f.path)
+        .forEach((f) => {
+          const text = takeModelText(modelPath(projectId, f.path));
+          if (text !== null) latest.set(f.id, text);
+        });
+      setFiles((fs) =>
+        fs.map((f) => ({ ...f, path: move(f.path), name: nameOf(move(f.path)), value: latest.get(f.id) ?? f.value })),
+      );
       setActivePath((cur) => (cur ? move(cur) : cur));
     },
     [projectId],
@@ -295,7 +319,8 @@ export default function ProjectWorkspace({
                 path={modelPath(projectId, active.path)}
                 label={`Contents of ${active.path}`}
                 value={active.value}
-                onChange={(v) => patch(active.path, { value: v })}
+                revision={active.revision}
+                onChange={(v) => patch(active.id, { value: v })}
                 onCursor={(line, column) => setCursor({ line, column })}
                 onSave={() => save(active.path)}
                 autoFocus
@@ -379,8 +404,8 @@ export default function ProjectWorkspace({
               tone: "ghost",
               onClick: () => {
                 setPending(null);
-                patch(pendingFile.path, { loading: true });
-                load(pendingFile.path);
+                patch(pendingFile.id, { loading: true });
+                load(pendingFile.id, pendingFile.path);
               },
             },
             {

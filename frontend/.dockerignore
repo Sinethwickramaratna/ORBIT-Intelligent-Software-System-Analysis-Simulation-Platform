@@ -10,3 +10,4 @@ Dockerfile
 .dockerignore
 README.md
 tsconfig.tsbuildinfo
+public/monaco
