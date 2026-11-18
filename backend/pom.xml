@@ -31,6 +31,8 @@
         <jjwt.version>0.12.6</jjwt.version>
         <bouncycastle.version>1.78.1</bouncycastle.version>
         <jgit.version>7.3.0.202506031305-r</jgit.version>
+        <maven-resolver.version>1.9.22</maven-resolver.version>
+        <commons-compress.version>1.28.0</commons-compress.version>
     </properties>
     <dependencies>
         <dependency>
@@ -70,6 +72,25 @@
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit</artifactId>
             <version>${jgit.version}</version>
+        </dependency>
+
+        <!-- Dependency setup without Maven/Gradle installed: Maven Resolver (with the Maven model builder) resolves and
+             downloads Maven/Gradle dependencies, including parents, BOMs and transitive dependencies. -->
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-supplier</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <!-- npm / pub packages are .tgz archives -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>${commons-compress.version}</version>
+        </dependency>
+        <!-- pyproject.toml, Pipfile and Gradle version catalogs (version managed by Boot's Jackson BOM) -->
+        <dependency>
+            <groupId>tools.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-toml</artifactId>
         </dependency>
 
         <!-- Bean Validation for request DTOs -->

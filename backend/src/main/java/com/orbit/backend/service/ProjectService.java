@@ -38,6 +38,7 @@ public class ProjectService {
     private final ProjectFileService fileService;
     private final GitCloneService cloneService;
     private final ProjectScanService scanService;
+    private final ProjectDependencyService dependencyService;
 
     public ProjectResponse create(UUID userId, CreateProjectRequest request) {
         String name = request.projectName().trim();
@@ -97,6 +98,7 @@ public class ProjectService {
         }
         log.info("User {} created project '{}' ({}) at {} [git: {}]", userId, name, project.getProjectId(), folder, gitStatus);
         scanService.scanQuietly(project); // language detection; a failing scan never fails the creation
+        dependencyService.checkQuietly(project); // dependency check runs by itself when a project is added
         return ProjectResponse.from(project, true, gitService.hasRepository(folder), gitStatus, folderCreated);
     }
 
@@ -168,6 +170,7 @@ public class ProjectService {
         log.info("User {} cloned {} (branch {}) as project '{}' ({}) at {}", userId, repo.url(), request.branch(), name,
                 project.getProjectId(), folder);
         scanService.scanQuietly(project); // language detection; a failing scan never fails the clone
+        dependencyService.checkQuietly(project); // dependency check runs by itself when a project is added
         return ProjectResponse.from(project, true, gitService.hasRepository(folder), null, folderCreated);
     }
 

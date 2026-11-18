@@ -43,9 +43,20 @@ orbit:
   scan:
     # Folders skipped by the language scan wherever they appear: dependencies and build output are not the project's
     # own source code and would distort the language percentages. Setting this list replaces the defaults.
-    ignored-folders: node_modules,.git,target,build,dist,venv,__pycache__,.venv,.next,.gradle
+    ignored-folders: node_modules,.git,target,build,dist,venv,__pycache__,.venv,.next,.gradle,.orbit,.dart_tool
     # Files above this size (minified/generated bundles) are left out of the scan
     max-file-bytes: 2097152
+  dependencies:
+    # Dependency Check / Setup Dependencies. In Docker the user's operating system is read from the project location
+    # (E:\... = Windows, /Users/... = macOS, otherwise Linux); set these when that guess is wrong (windows|mac|linux, x64|arm64).
+    host-os: ${ORBIT_HOST_OS:}
+    host-arch: ${ORBIT_HOST_ARCH:}
+    # Python version assumed for a project that has no virtual environment (.venv) yet
+    python-version: ${ORBIT_PYTHON_VERSION:3.12}
+    parallel-downloads: 8
+    max-download-mb: 512
+    # also count packages in the user's own caches (~/.m2, ~/.gradle, ~/.nuget, pub cache) as installed
+    user-caches: true
   jwt:
     # Created by the user in the first-run setup screen and stored as JWT_SECRET in .env
     secret: ${JWT_SECRET:}

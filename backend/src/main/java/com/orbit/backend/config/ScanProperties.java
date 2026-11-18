@@ -17,7 +17,9 @@ public record ScanProperties(List<String> ignoredFolders, Long maxFileBytes) {
     public static final List<String> DEFAULT_IGNORED_FOLDERS = List.of(
             "node_modules", ".git", "target", "build", "dist", "venv", "__pycache__",
             // same kind of folder under another name: Python virtualenv, Next.js and Gradle output
-            ".venv", ".next", ".gradle");
+            ".venv", ".next", ".gradle",
+            // dependencies downloaded by Setup Dependencies (Maven/NuGet/pub) and Dart's resolved packages
+            ".orbit", ".dart_tool");
 
     /** Files bigger than this are minified or generated bundles, not hand-written source. */
     public static final long DEFAULT_MAX_FILE_BYTES = 2L * 1024 * 1024;

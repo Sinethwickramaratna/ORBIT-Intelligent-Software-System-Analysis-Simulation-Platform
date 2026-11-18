@@ -175,6 +175,62 @@ export interface ProjectScan {
   frameworks: FrameworkFinding[];
 }
 
+/** One declared dependency of a manifest group, as the dependency check saw it. */
+export type DependencyState = "INSTALLED" | "MISSING" | "OUTDATED" | "LOCAL" | "SDK" | "UNSUPPORTED";
+
+export interface DependencyItem {
+  name: string;
+  /** Version requirement as written in the manifest (may be null). */
+  required: string | null;
+  installed: string | null;
+  scope: string | null;
+  state: DependencyState;
+  note: string | null;
+}
+
+/** A manifest group: a package.json, a pom.xml module, the Python manifests of one folder ... */
+export interface DependencyUnit {
+  ecosystem: "npm" | "pip" | "maven" | "gradle" | "nuget" | "pub" | "native";
+  ecosystemLabel: string;
+  manifest: string;
+  /** Where Setup Dependencies saves the files, relative to the project folder. */
+  installLocation: string | null;
+  status: DependencyCheckStatus;
+  message: string | null;
+  total: number;
+  missing: number;
+  dependencies: DependencyItem[];
+}
+
+/** INSTALLED = green check, MISSING = red X, NO_DEPENDENCIES = green (nothing declared). */
+export type DependencyCheckStatus = "INSTALLED" | "MISSING" | "NO_DEPENDENCIES";
+
+export interface DependencyCheck {
+  checkId: string;
+  projectId: string;
+  checkedAt: string;
+  status: DependencyCheckStatus;
+  totalDependencies: number;
+  missingDependencies: number;
+  /** The computer the packages are checked / downloaded for, e.g. "Windows x64". */
+  targetPlatform: string;
+  units: DependencyUnit[];
+}
+
+export type DependencySetupState = "IDLE" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+export interface DependencySetupProgress {
+  state: DependencySetupState;
+  phase: string | null;
+  percent: number;
+  unitIndex: number;
+  unitCount: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  failures: string[];
+  log: string[];
+}
+
 export interface LocationInspection {
   valid: boolean;
   message: string | null;
@@ -349,6 +405,20 @@ export const api = {
   scanProgress: (projectId: string) => authed<ScanProgress>(`/api/projects/${projectId}/scan/progress`),
   /** The newest stored scan; `undefined` (HTTP 204) when the project was never scanned. */
   latestScan: (projectId: string) => authed<ProjectScan | undefined>(`/api/projects/${projectId}/scan`),
+
+  /** The stored dependency check (made automatically when the project was added); `undefined` (204) when never checked. */
+  dependencyCheck: (projectId: string) => authed<DependencyCheck | undefined>(`/api/projects/${projectId}/dependencies`),
+  /** The Dependency Check button: checks the project folder now. */
+  runDependencyCheck: (projectId: string) =>
+    authed<DependencyCheck>(`/api/projects/${projectId}/dependencies/check`, { method: "POST" }),
+  /** Setup Dependencies (after the user confirmed): starts the downloads and answers at once. */
+  startDependencySetup: (projectId: string) =>
+    authed<DependencySetupProgress>(`/api/projects/${projectId}/dependencies/setup`, { method: "POST" }),
+  /** Progress of Setup Dependencies; poll until `state` is no longer RUNNING. */
+  dependencySetupProgress: (projectId: string) =>
+    authed<DependencySetupProgress>(`/api/projects/${projectId}/dependencies/setup/progress`),
+  cancelDependencySetup: (projectId: string) =>
+    authed<DependencySetupProgress>(`/api/projects/${projectId}/dependencies/setup`, { method: "DELETE" }),
 
   currentUser: () => authed<User>("/api/users/me"),
 

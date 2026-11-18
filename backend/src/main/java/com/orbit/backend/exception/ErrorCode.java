@@ -40,6 +40,8 @@ public enum ErrorCode {
     GIT_REPOSITORY_UNAVAILABLE(HttpStatus.BAD_REQUEST, "The repository could not be reached"),
     GIT_CLONE_FAILED(HttpStatus.BAD_GATEWAY, "The repository could not be cloned"),
     PROJECT_CLONE_TARGET_EXISTS(HttpStatus.CONFLICT, "The clone folder already exists and is not empty"),
+    DEPENDENCY_CHECK_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "The dependencies of the project could not be checked"),
+    DEPENDENCY_SETUP_RUNNING(HttpStatus.CONFLICT, "Dependency setup is already running for this project"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error");
 
     private final HttpStatus status;

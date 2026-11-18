@@ -1,16 +1,39 @@
 # ORBIT — Intelligent Software System Analysis & Simulation Platform
 
-Phase 1: **login system** (Next.js frontend · Spring Boot 4 backend · PostgreSQL in Docker).
+ORBIT registers software projects (a folder on your disk or a cloned public Git repository) and analyses them: which
+**languages** they use (files and source lines), which **build systems**, **configuration files** and **frameworks** they
+have - every finding with the evidence that proves it. Next.js frontend · Spring Boot 4 backend · PostgreSQL in Docker.
+
+Implemented so far: first-run setup, login (JWT + refresh tokens), projects (create / clone / open / delete), a file
+explorer, the project scan with its four result windows and the dependency check + one-click dependency setup
+(Architecture Reconstruction, step 1). `llm-service/` and `ml-service/` are reserved for later phases.
 
 ```
 Orbit/
-├── docker-compose.yml         # postgres + backend + frontend
-├── .env.example               # SAMPLE with empty secrets  →  copy to .env
-├── .env                       # your own settings, written by the setup screen (git-ignored)
-├── infrastructure/postgresql  # entrypoint script: Postgres starts once DB credentials exist
-├── backend/                   # Spring Boot 4 (Java 17+), Maven wrapper, Dockerfile
-├── frontend/                  # Next.js (App Router, TypeScript), Dockerfile
-└── llm-service/  ml-service/  # reserved for later phases
+├── docker-compose.yml          # postgres + backend + frontend
+├── .env.example                # SAMPLE with empty secrets  →  copy to .env
+├── .env                        # your own settings, written by the setup screen (git-ignored)
+├── start.cmd / start.sh        # start everything (+ the folder helper, see below)
+├── scripts/                    # orbit-watch.* (folder helper), orbit-apply.cmd, build-images.* (compressed images)
+├── infrastructure/postgresql/  # Postgres image: starts once DB credentials exist, SQL backup + restore
+├── backend/                    # Spring Boot 4 (Java 17+), Maven wrapper, Dockerfile
+│   └── src/main/java/com/orbit/backend/
+│       ├── config/             # security, dynamic data source (DB connects after setup), properties
+│       ├── controller/         # REST API: auth, setup, users, projects, settings
+│       ├── service/            # business logic: auth/JWT, setup/.env, projects, git init/clone, scan
+│       ├── scan/               # scanners: languages, line counter, build systems, config files, frameworks
+│       ├── deps/               # dependency check + Setup Dependencies (npm, Python, Maven, Gradle, NuGet, pub)
+│       ├── entity/  repository/  dto/  filter/  exception/
+│       └── ../resources/db/migration/   # Flyway V1–V8 (schema + detection catalogs + dependency check)
+├── frontend/                   # Next.js (App Router, TypeScript, static export), nginx, Dockerfile
+│   └── src/
+│       ├── app/                # page, layout, global + home styles
+│       ├── components/         # onboarding screens, home screen, dialogs, file tree, analysis windows
+│       └── lib/                # API client (auto token refresh), themes, folder-apply hook
+├── .github/workflows/main.yml  # CI: preflight checks, backend tests, frontend type-check + build
+├── projects/                   # default projects folder when no drives are listed (git-ignored)
+├── backups/                    # automatic SQL backups of the database (git-ignored)
+└── llm-service/  ml-service/   # reserved for later phases
 ```
 
 ## Run it (any computer, after cloning)
@@ -46,11 +69,94 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
 3. **Create a project:** on the home page click **Create New Project**, enter a name, press the folder button to choose the
    project folder (or type it), pick the project type, add an optional description, keep *Initialize Git repository*
    ticked for a new folder (it is skipped automatically if the folder already is a Git repository) and click **Create Project**.
-4. **Open a project:** it opens right away, showing its folders and files on the right; click a project in the left
-   **Projects** panel any time to open it again (the arrow on the panel edge or `Ctrl+B` hides the panel).
-5. **Add or change drives later:** gear icon in the Projects panel -> **Settings** -> edit the folders -> **Save**, then
+4. **Or clone a repository:** click **Clone Git Repository**, paste a public `http(s)` URL, press **Check Repository**,
+   pick one of its branches, choose where to clone it and click **Clone Repository**. When the clone is done it becomes a project.
+   (Private repositories - SSH key / access token - are not supported yet.)
+5. **Open a project:** it opens right away and is scanned automatically. The Explorer shows its folders and files
+   (loaded one level at a time) and, below them, the **Analysis**, **Build System**, **Configuration** and **Framework**
+   windows (see *Project analysis*). Click a project in the left **Projects** panel any time to open it again
+   (the arrow on the panel edge or `Ctrl+B` hides the panel; `Ctrl+J` hides the Analysis window).
+6. **Dependencies (Architecture Reconstruction, step 1):** when a project is opened the top bar shows **Dependency Check**
+   and a status icon: a **green check** when every dependency is installed, a **red X** when some are missing. The check
+   runs by itself when the project is added; press **Dependency Check** to run it again. When something is missing, press
+   **Setup Dependencies**, confirm, and ORBIT downloads everything into the project folder - the red X turns into the green
+   check when it is done (see *Dependency check and setup*).
+7. **Scan again:** after the folder changed, press **Scan** in the Explorer; a progress bar shows how far it is.
+8. **Delete a project:** the three dots next to a project -> **Delete**, then type its name. This removes it from ORBIT
+   only - the files on disk are kept.
+9. **Add or change drives later:** gear icon in the Projects panel -> **Settings** -> edit the folders -> **Save**, then
    ORBIT applies it by itself (the small ORBIT helper window that `start.cmd` opens does this).
-6. **Stop / reset:** `docker compose down` stops everything and keeps your data; see *Database persistence* to start from zero.
+10. **Stop / reset:** `docker compose down` stops everything and keeps your data; see *Database persistence* to start from zero.
+
+## Project analysis
+
+A scan runs when a project is created or cloned and whenever you press **Scan**. Every scan is stored (`project_scan`)
+with its results; the windows show the newest one. Dependency and build-output folders (`node_modules`, `.git`,
+`target`, `build`, `dist`, `venv`, `__pycache__`, `.venv`, `.next`, `.gradle` - `orbit.scan.ignored-folders`) are
+skipped, symbolic links are never followed and files above 2 MB (`orbit.scan.max-file-bytes`) are left out.
+
+| Window | What it shows | How it is found |
+|---|---|---|
+| **Analysis** | share of each language as a bar chart, with files and source lines | file extension (`language_extensions`); a small lexer counts lines with code - blank and comment-only lines are not counted, comment markers inside strings are not mistaken for comments |
+| **Build System** | each build system with its evidence files | evidence file names / patterns (`build_file_type`): `pom.xml`, `build.gradle`, `package.json`, `CMakeLists.txt`, ... |
+| **Configuration** | each configuration file and where it is | file name (`configuration_file`) |
+| **Framework** | each framework with the dependency declarations that prove it, e.g. `pom.xml 9:19 spring-boot-starter-web` | dependency metadata, not a text search: `pom.xml`, `build.gradle(.kts)`, `package.json`, `requirements*.txt`, `pyproject.toml`, `Pipfile`, `pubspec.yaml`, `*.csproj` are parsed and the declared names compared with `framework_dependency` (only for the same package manager; `name-*` is a prefix rule) |
+
+Detected out of the box:
+
+* **Languages:** Java, Python, JavaScript, TypeScript, C/C++, C#, Dart, SQL
+* **Build systems:** Maven, Gradle, Ant, npm, Yarn, pnpm, pip (requirements), Pipenv, Python packaging, Poetry, CMake, Make, Meson, NuGet, Dart pub
+* **Configuration files:** `application.yml` / `.yaml` / `.properties`, `Dockerfile`, `docker-compose.yml` / `.yaml`, `package.json`, `requirements.txt`
+* **Frameworks:** Spring Boot, Spring Framework, Spring Data, Quarkus, Micronaut, Vert.x, Dropwizard, Apache Struts, FastAPI,
+  Flask, Django, Tornado, Pyramid, Streamlit, TensorFlow, PyTorch, Express, React, Next.js, Vue.js, Angular, NestJS, Svelte,
+  Nuxt, Fastify, Koa, Electron, React Native, Flutter, ASP.NET Core
+
+The scanners contain no concrete names: everything above is seed data in the Flyway migrations (V3–V7), so a new
+language, build system, configuration file or framework is added with a new migration.
+
+## Dependency check and setup
+
+Architecture Reconstruction needs every library a project uses on disk, so its first step is the dependency check.
+
+* **Dependency Check** (top bar, next to the open project) reads the project's manifests and looks at what is installed.
+  It runs automatically when a project is created or cloned (and when a project that was never checked is opened).
+  The icon next to the button is a **green check** when everything is installed (or nothing is declared) and a
+  **red X** when something is missing. The middle area (*Architecture Reconstruction*) lists every manifest with each
+  dependency, the version it requires, the version installed and its state.
+* **Setup Dependencies** appears when something is missing. A confirmation window says what will be downloaded, from
+  where and into which folder; after **Yes, Set Up** the downloads run in the background with a progress bar, and the
+  check runs again at the end - the red X becomes the green check. Anything that could not be installed is listed.
+* Nothing needs to be installed on your computer (or in the Docker image) for this: ORBIT downloads the packages itself
+  over HTTPS and verifies the checksums the registries publish. Packages are chosen for **your** operating system even
+  when ORBIT runs in Docker (read from the project location: `E:\...` = Windows, `/Users/...` = macOS, otherwise
+  Linux; override with `ORBIT_HOST_OS` = windows|mac|linux and `ORBIT_HOST_ARCH` = x64|arm64). Install scripts of
+  packages (npm `postinstall`, ...) are never run, and your own files are not changed.
+
+| Ecosystem | Manifests read | Setup downloads into (inside the project folder) | Also counts as installed |
+|---|---|---|---|
+| Node.js | `package.json` (+ `package-lock.json` / `npm-shrinkwrap.json`, workspaces) | `node_modules` - exactly the lockfile versions, otherwise npm-style resolution and hoisting | - |
+| Python | `requirements*.txt` (with `-r`), `pyproject.toml` (PEP 621 and Poetry), `Pipfile` | the project's `.venv` / `venv` / `env`, or a new `.venv` next to the manifest (wheels for your OS and Python version) | - |
+| Maven | `pom.xml` (modules, parents, BOMs, `dependencyManagement`, properties) | `.orbit/maven-repository` (a standard Maven repository) | `~/.m2/repository` |
+| Gradle | `build.gradle(.kts)`, `gradle/libs.versions.toml`, `platform(...)` and Spring Boot BOMs | `.orbit/maven-repository` | `~/.m2`, `~/.gradle/caches` |
+| .NET | `*.csproj` / `*.fsproj` / `*.vbproj`, `Directory.Packages.props`, `packages.config` | `.orbit/nuget-packages` (layout of NuGet's global packages folder) | `~/.nuget/packages` |
+| Dart / Flutter | `pubspec.yaml` (+ `pubspec.lock`) | `.orbit/pub-cache` (layout of the pub cache) | `.dart_tool/package_config.json`, your pub cache |
+| C / C++ | `CMakeLists.txt`, `Makefile`, `meson.build` | nothing: system libraries have no package registry (shown as information) | - |
+
+States of a dependency: *Installed*, *Missing*, *Wrong version* (installed, but not the version the manifest accepts),
+*In project* (a module / workspace package / local path), *From SDK* (e.g. `flutter: sdk: flutter`) and *Manual*
+(git or URL dependencies, which have to be installed with the ecosystem's own tool). The `.orbit` folder gets its own
+`.gitignore`, so the downloads are never committed; the scan skips `.orbit` and `.dart_tool` like `node_modules`.
+
+Settings (`orbit.dependencies.*` in `application.yaml`): `host-os`, `host-arch`, `python-version` (default 3.12, used
+when a project has no virtual environment yet), `parallel-downloads`, `max-download-mb`, `user-caches` and the registry
+URLs (`npm-registry`, `pypi-url`, `maven-repositories`, `nuget-url`, `pub-url`).
+
+The same check and setup are available on the command line, also inside the Docker image:
+
+```bash
+java -cp app.jar -Dloader.main=com.orbit.backend.deps.DependencyCli \
+     org.springframework.boot.loader.launch.PropertiesLauncher check|setup <project folder> [windows|mac|linux]
+```
 
 ## First-run flow
 
@@ -71,7 +177,7 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
 3. **Database** – PostgreSQL starts with your credentials; the backend connects and Flyway creates the tables.
    A progress screen shows this. If it fails (e.g. wrong credentials for an existing database) the reason is shown with a Retry button.
 4. **Register** – no users exist yet, so you register a username + password (stored as an Argon2id hash).
-5. **Sign in** – then the welcome screen with a **Log out** button.
+5. **Sign in** – then the home page with the Projects panel, **Create New Project**, **Clone Git Repository** and **Sign Out**.
 
 The backend starts *without* a database (only `/api/setup/**` works; every other API answers `503 DATABASE_NOT_READY`) so the setup screen can run first.
 
@@ -137,7 +243,21 @@ Data lives in the Docker named volume `orbit_pgdata` on *your* machine (never in
 | `users` | `user_id` UUID PK, `user_name`, `password` (Argon2), `created_at`, `updated_at` |
 | `refresh_token_table` | `token_id` UUID PK, `token`, `user_id` FK→users, `created_at`, `expired_at` |
 | `app_settings` | `setting_key` PK, `setting_value`, `updated_at` (theme) |
-| `projects` | `project_id` UUID PK, `project_name`, `location`, `project_type` (enum: WEB_APPLICATION … OTHER), `description` (optional), `user_id` FK→users (1 user : N projects), `created_at`, `updated_at` |
+| `projects` | `project_id` UUID PK, `project_name`, `location`, `project_type` (enum: WEB_APPLICATION … OTHER), `description` (optional), `user_id` FK→users (1 user : N projects), `created_at`, `updated_at`; unique (`user_id`, `location`) |
+| `project_scan` | `scan_id` UUID PK, `project_id` FK→projects, `scanned_at` (one row per scan) |
+| `language` / `language_extensions` | catalog: `language_name`; `extension_type` (`.java`) → `language_id` |
+| `project_language_detail` | PK (`scan_id`, `language_id`), `lines_of_code`, `number_of_files` |
+| `build_system` / `build_file_type` | catalog: `name`; `file_type` (file name or `*.ext`) → `build_system_id` |
+| `project_build_detail` / `project_build_evidence` | PK (`scan_id`, `build_system_id`); evidence adds `file_path` |
+| `configuration_file` | catalog: `file_name` |
+| `project_configuration_detail` | PK (`scan_id`, `configuration_file_id`, `file_path`) |
+| `framework` / `framework_dependency` | catalog: `name`; `dependency_name` + `package_manager` (maven, npm, pip, pub, nuget) → `framework_id` |
+| `project_framework_detail` / `project_framework_evidence` | PK (`scan_id`, `framework_id`); evidence: `evidence_id` PK, `dependency_name`, `file_path`, `line_number`, `col_number` |
+| `project_dependency_check` | `check_id` UUID PK, `project_id` FK→projects, `checked_at`, `status` (INSTALLED / MISSING / NO_DEPENDENCIES), `total_count`, `missing_count`, `target_platform` - only the newest check per project is kept |
+| `project_dependency_unit` | `unit_id` UUID PK, `check_id` FK, `position`, `ecosystem`, `manifest_path`, `install_location`, `status`, `message` |
+| `project_dependency_item` | `item_id` UUID PK, `unit_id` FK, `position`, `dependency_name`, `required_version`, `installed_version`, `scope`, `state`, `note` |
+
+Deleting a project deletes its scans and all scan results (`ON DELETE CASCADE`). The full diagram is in `orbit-er-diagram.mermaid`.
 
 ## API
 
@@ -148,7 +268,17 @@ Protected (`Authorization: Bearer <access token>`): `POST /api/auth/logout`, `GE
 Projects (own projects only): `GET|POST /api/projects`, `GET /api/projects/config`, `GET /api/projects/inspect?location=`,
 `GET /api/projects/{id}`, `GET /api/projects/{id}/tree?path=` (one folder level, lazily),
 `GET /api/projects/browse?path=` and `POST /api/projects/browse/folder` (folder chooser: only the mounted folders in Docker),
+`DELETE /api/projects/{id}?confirmName=` (removes it from ORBIT; files on disk are kept),
 `GET|PUT /api/settings/folders` (the drives/folders ORBIT may open).
+Clone: `POST /api/projects/clone/inspect` `{repositoryUrl}` (owner, default branch, branches of a public repository) and
+`POST /api/projects/clone` `{repositoryUrl, branch, location, projectName, description?}` (returns when the clone is complete).
+Scan: `POST /api/projects/{id}/scan` (runs a new scan and returns it), `GET /api/projects/{id}/scan` (newest scan;
+`204` when never scanned), `GET /api/projects/{id}/scan/progress` (`{active, phase, percent}` for the progress bar).
+Dependencies: `GET /api/projects/{id}/dependencies` (stored check; `204` when never checked),
+`POST /api/projects/{id}/dependencies/check` (the Dependency Check button), `POST /api/projects/{id}/dependencies/setup`
+(Setup Dependencies, `202`; `409 DEPENDENCY_SETUP_RUNNING` when one is running),
+`GET /api/projects/{id}/dependencies/setup/progress` (`{state: IDLE|RUNNING|SUCCEEDED|FAILED|CANCELLED, phase, percent,
+failures, log}`) and `DELETE /api/projects/{id}/dependencies/setup` (cancel).
 
 `POST /api/setup/environment` accepts `{secretKey?, dbUsername?, dbPassword?, folders?}` and only the values that are still
 missing; anything already configured is rejected with `409 ENVIRONMENT_ALREADY_CONFIGURED`.
@@ -165,7 +295,23 @@ Errors are JSON: `{timestamp,status,code,message,path,fieldErrors?}` — e.g. `U
 
 ## Tests
 
-`cd backend && ./mvnw test` — unit tests plus an end-to-end auth flow test on in-memory H2 (no Docker needed).
+`cd backend && ./mvnw test` — on in-memory H2 (no Docker needed):
+
+* unit tests for every scanner (`LanguageScanner`, `LineCounter`, `BuildSystemScanner`, `ConfigFileScanner`,
+  `DependencyReader`, `FrameworkScanner`) and the services (setup / `.env`, folder browse and settings, path
+  resolution, project files, git init and clone);
+* the dependency check of every ecosystem (`DependencyCheckerTest`) and the version-range rules of npm/pub, PEP 440 and
+  NuGet (`SemverTest`, `Pep440Test`, `NuGetVersionTest`);
+* integration tests for the whole authentication flow, the project API and the dependency API
+  (`DependencyApiIntegrationTest`: automatic check on create, check button, setup job).
+
+Real downloads from npm, PyPI, Maven Central, nuget.org and pub.dev need internet and run only on request:
+`./mvnw test -Dtest=DependencySetupNetworkTest -Dorbit.networkTests=true`.
+
+Frontend: `cd frontend && npm run typecheck && npm run build`.
+
+CI (`.github/workflows/main.yml`) runs on every push to `main`: preflight checks (required files and tools, valid
+compose file, Maven dependencies, npm lockfile in sync), the backend tests, and the frontend type-check and build.
 
 ## Security notes
 

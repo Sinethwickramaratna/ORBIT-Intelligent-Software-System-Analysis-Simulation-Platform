@@ -10,6 +10,10 @@ import CloneDialog from "./CloneDialog";
 import ProjectMenu from "./ProjectMenu";
 import DeleteProjectDialog from "./DeleteProjectDialog";
 import FileTree from "./FileTree";
+import DependencyToolbar from "./DependencyToolbar";
+import DependencySetupDialog from "./DependencySetupDialog";
+import ArchitecturePanel from "./ArchitecturePanel";
+import { useDependencies } from "@/lib/useDependencies";
 
 /**
  * Home page shown after login (see screens/Wireframes/HomePage.png).
@@ -148,6 +152,9 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
 
   const found = projects.find((p) => p.projectId === activeId) ?? null;
   const active = found ?? (stored ? { ...stored, createdAt: "" } : null);
+  // Dependency check of the open project: loaded (or run automatically - autoCheck) whenever a project is opened,
+  // including right after it was added.
+  const dependencies = useDependencies(active?.projectId ?? null);
 
   // The stored project no longer exists (deleted elsewhere): drop it.
   useEffect(() => {
@@ -246,6 +253,11 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
             ))}
           </nav>
         </div>
+        {active && (
+          <div className="menubar-center">
+            <DependencyToolbar dep={dependencies} />
+          </div>
+        )}
         <div className="menubar-right">
           <button type="button" className="btn ghost signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign Out"}
@@ -342,6 +354,7 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
                 </button>
               </div>
+              <ArchitecturePanel dep={dependencies} />
             </main>
             <FileTree projectId={active.projectId} projectName={active.projectName} />
           </div>
@@ -397,6 +410,15 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
       {deleting && <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} onDeleted={onDeleted} />}
       {creating && <ProjectDialog onClose={() => setCreating(false)} onCreated={onCreated} />}
       {cloning && <CloneDialog onClose={() => setCloning(false)} onCreated={onCreated} />}
+      {active && dependencies.confirmOpen && dependencies.check && (
+        <DependencySetupDialog
+          projectName={active.projectName}
+          location={active.location}
+          check={dependencies.check}
+          onCancel={dependencies.closeConfirm}
+          onConfirm={dependencies.confirmSetup}
+        />
+      )}
 
       <footer className="statusbar">
         <span className="status-item">ORBIT</span>
