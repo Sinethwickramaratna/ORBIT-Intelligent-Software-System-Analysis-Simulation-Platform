@@ -124,8 +124,41 @@ Architecture Reconstruction needs every library a project uses on disk, so its f
   **red X** when something is missing. The middle area (*Architecture Reconstruction*) lists every manifest with each
   dependency, the version it requires, the version installed and its state.
 * **Setup Dependencies** appears when something is missing. A confirmation window says what will be downloaded, from
-  where and into which folder; after **Yes, Set Up** the downloads run in the background with a progress bar, and the
-  check runs again at the end - the red X becomes the green check. Anything that could not be installed is listed.
+  where and into which folder; after **Yes, Set Up** a **progress window** opens: an overall progress bar, one row per
+  manifest (waiting / working / done / failed, with what happened), the package being downloaded, how many packages
+  are installed or failed, the elapsed time and a live activity log. **Run in Background** hides it (the top bar keeps a
+  small progress bar - click it to open the window again) and **Cancel Setup** stops at once: the downloads in flight
+  are aborted (half-downloaded files are thrown away), queued packages are not started, a running `python -m venv` is
+  stopped. What was completely installed stays.
+  At the end the check runs again - the red X becomes the green check - and the window stays as the record of what
+  happened (**View Details** in the panel opens it again). Anything that could not be installed is listed.
+* **Only what the code uses is downloaded.** Declared dependencies the source code never uses are shown as *Not used*,
+  do not make the check red and are not downloaded - nor what only they pull in. ORBIT reads the imports of the
+  JavaScript / TypeScript / CSS, Python (also notebooks) and Dart files, plus the names mentioned in configuration, build
+  and CI files (package.json scripts and their commands, ESLint / Babel / PostCSS / Jest configs, `angular.json`,
+  Dockerfiles, Procfiles, workflows, `[tool.x]` tables, `analysis_options.yaml` ...). It is generous: a package counts as
+  used if any of its import names (`PyYAML` -> `yaml`, `beautifulsoup4` -> `bs4`, `djangorestframework` ->
+  `rest_framework` in `INSTALLED_APPS`), commands, plugin short names (`eslint-plugin-react` -> `react`) or typical
+  implicit uses (`psycopg2` when the code talks to PostgreSQL, `@types/x` with `x`, `pytest-*` with tests) appears. A
+  folder without any source code of the language keeps every dependency. Maven / Gradle and .NET dependencies are
+  always all installed (their packages do not map reliably to the code's packages). The confirmation window can
+  download the unused ones too (*Also download ... the code does not use*).
+* **Python packages always go into a virtual environment of the project**, never into the computer's Python: an
+  existing one (`.venv`, `venv`, `env` or any folder with a `pyvenv.cfg`, next to the requirements or above), otherwise
+  setup creates `.venv`. When ORBIT runs directly on your computer and finds Python (`py` / `python3` / `python`), this is
+  a real `python -m venv` and the packages are chosen for that Python version. In Docker there is no Python of your
+  computer to call, so ORBIT writes the venv layout (`pyvenv.cfg`, `site-packages`) and you run
+  `python -m venv .venv` once in that folder to add the interpreter - the installed packages are kept.
+* While **Dependency Check** runs, a progress bar in the top bar and in the panel shows which manifest is being checked.
+* **Pinned Python versions that cannot be installed** (for example `numpy==1.21.0`, which has no ready-made package for
+  Python 3.12 on Windows): with the option in the confirmation window (on by default), ORBIT installs the newest version
+  that works on your computer - the newest one with the **same major version** first (`cffi==1.15.0` -> `1.17.x`), only if
+  there is none the newest overall (`pyyaml==5.3.1` -> `6.0.x`) - and rewrites that line of `requirements*.txt`, keeping
+  extras, markers and comments: `pyyaml==6.0.3  # updated by ORBIT: was ==5.3.1 - no ready-made package (wheel) for Windows / Python 3.12`.
+  Before its first change ORBIT copies the file to `requirements.txt.orbit-backup`. The progress window lists every
+  changed version. Lines it cannot rewrite safely (continued with `\`, hash-checked with `--hash`) and versions declared
+  in `pyproject.toml` / `Pipfile` are not changed: the setup reports which version would work instead. With the option
+  switched off, your files are never changed.
 * Nothing needs to be installed on your computer (or in the Docker image) for this: ORBIT downloads the packages itself
   over HTTPS and verifies the checksums the registries publish. Packages are chosen for **your** operating system even
   when ORBIT runs in Docker (read from the project location: `E:\...` = Windows, `/Users/...` = macOS, otherwise
@@ -143,8 +176,9 @@ Architecture Reconstruction needs every library a project uses on disk, so its f
 | C / C++ | `CMakeLists.txt`, `Makefile`, `meson.build` | nothing: system libraries have no package registry (shown as information) | - |
 
 States of a dependency: *Installed*, *Missing*, *Wrong version* (installed, but not the version the manifest accepts),
-*In project* (a module / workspace package / local path), *From SDK* (e.g. `flutter: sdk: flutter`) and *Manual*
-(git or URL dependencies, which have to be installed with the ecosystem's own tool). The `.orbit` folder gets its own
+*In project* (a module / workspace package / local path), *From SDK* (e.g. `flutter: sdk: flutter`), *Manual*
+(git or URL dependencies, which have to be installed with the ecosystem's own tool) and *Not used* (declared, but the
+code never uses it: not downloaded). The `.orbit` folder gets its own
 `.gitignore`, so the downloads are never committed; the scan skips `.orbit` and `.dart_tool` like `node_modules`.
 
 Settings (`orbit.dependencies.*` in `application.yaml`): `host-os`, `host-arch`, `python-version` (default 3.12, used
@@ -155,7 +189,7 @@ The same check and setup are available on the command line, also inside the Dock
 
 ```bash
 java -cp app.jar -Dloader.main=com.orbit.backend.deps.DependencyCli \
-     org.springframework.boot.loader.launch.PropertiesLauncher check|setup <project folder> [windows|mac|linux]
+     org.springframework.boot.loader.launch.PropertiesLauncher check|setup <project folder> [windows|mac|linux] [--no-update] [--all]
 ```
 
 ## First-run flow
@@ -275,10 +309,11 @@ Clone: `POST /api/projects/clone/inspect` `{repositoryUrl}` (owner, default bran
 Scan: `POST /api/projects/{id}/scan` (runs a new scan and returns it), `GET /api/projects/{id}/scan` (newest scan;
 `204` when never scanned), `GET /api/projects/{id}/scan/progress` (`{active, phase, percent}` for the progress bar).
 Dependencies: `GET /api/projects/{id}/dependencies` (stored check; `204` when never checked),
-`POST /api/projects/{id}/dependencies/check` (the Dependency Check button), `POST /api/projects/{id}/dependencies/setup`
-(Setup Dependencies, `202`; `409 DEPENDENCY_SETUP_RUNNING` when one is running),
-`GET /api/projects/{id}/dependencies/setup/progress` (`{state: IDLE|RUNNING|SUCCEEDED|FAILED|CANCELLED, phase, percent,
-failures, log}`) and `DELETE /api/projects/{id}/dependencies/setup` (cancel).
+`POST /api/projects/{id}/dependencies/check` (the Dependency Check button), `GET /api/projects/{id}/dependencies/check/progress`
+(progress of the running / last check), `POST /api/projects/{id}/dependencies/setup`
+(Setup Dependencies, `202`; optional body `{updateManifests: true|false, skipUnused: true|false}`, both default true; `409 DEPENDENCY_SETUP_RUNNING` when one is running),
+`GET /api/projects/{id}/dependencies/setup/progress` (`{kind, state: IDLE|RUNNING|SUCCEEDED|FAILED|CANCELLED, phase, current,
+percent, steps[{title, state, summary}], installed, failed, failures, log}`) and `DELETE /api/projects/{id}/dependencies/setup` (cancel).
 
 `POST /api/setup/environment` accepts `{secretKey?, dbUsername?, dbPassword?, folders?}` and only the values that are still
 missing; anything already configured is rejected with `409 ENVIRONMENT_ALREADY_CONFIGURED`.

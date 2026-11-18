@@ -11,6 +11,7 @@ const STATE_LABEL: Record<DependencyItem["state"], string> = {
   LOCAL: "In project",
   SDK: "From SDK",
   UNSUPPORTED: "Manual",
+  UNUSED: "Not used",
 };
 
 function headline(dep: Dependencies): { title: string; detail: string } {
@@ -39,6 +40,7 @@ function headline(dep: Dependencies): { title: string; detail: string } {
 function UnitRow({ unit }: { unit: DependencyUnit }) {
   const ok = unit.status !== "MISSING";
   const shown = unit.dependencies;
+  const unused = shown.filter((d) => d.state === "UNUSED").length;
   return (
     <details className={`dep-unit${ok ? "" : " has-missing"}`} open={!ok && unit.missing <= 40}>
       <summary>
@@ -48,7 +50,8 @@ function UnitRow({ unit }: { unit: DependencyUnit }) {
         <span className="dep-unit-eco">{unit.ecosystemLabel}</span>
         <code className="dep-unit-manifest" title={unit.manifest}>{unit.manifest}</code>
         <span className="dep-unit-count">
-          {unit.total === 0 ? "no dependencies" : ok ? `${unit.total} installed` : `${unit.missing} of ${unit.total} missing`}
+          {unit.total === 0 ? "no dependencies" : ok ? `${unit.total - unused} installed` : `${unit.missing} of ${unit.total - unused} missing`}
+          {unused > 0 && `, ${unused} not used`}
         </span>
       </summary>
       <div className="dep-unit-body">
@@ -122,37 +125,61 @@ export default function ArchitecturePanel({ dep }: { dep: Dependencies }) {
           </div>
         </div>
 
-        {dep.installing && setup && (
+        {dep.checking && dep.checkProgress && (
           <div className="dep-progress">
-            <div className="dep-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={setup.percent}>
-              <span style={{ width: `${setup.percent}%` }} />
+            <div className="dep-progress-bar" role="progressbar" aria-label="Check progress" aria-valuemin={0} aria-valuemax={100}
+              aria-valuenow={dep.checkProgress.percent}>
+              <span style={{ width: `${dep.checkProgress.percent}%` }} />
             </div>
             <div className="dep-progress-row">
-              <span>
-                {setup.unitCount > 0 ? `Step ${Math.min(setup.unitIndex + 1, setup.unitCount)} of ${setup.unitCount} · ` : ""}
-                {setup.percent}%
+              <span className="dep-progress-phase" title={dep.checkProgress.phase ?? undefined}>
+                {dep.checkProgress.current ?? dep.checkProgress.phase ?? "Starting…"}
               </span>
-              <button type="button" className="btn ghost small" onClick={dep.cancelSetup}>Cancel</button>
+              <span>
+                {dep.checkProgress.unitCount > 0
+                  ? `${Math.min(dep.checkProgress.unitIndex + 1, dep.checkProgress.unitCount)} of ${dep.checkProgress.unitCount} · `
+                  : ""}
+                {dep.checkProgress.percent}%
+              </span>
             </div>
-            {setup.log.length > 0 && <pre className="dep-log">{setup.log.slice(-8).join("\n")}</pre>}
           </div>
         )}
 
-        {finished && setup.failures.length > 0 && (
-          <div className="alert dep-failures" role="alert">
-            <strong>{setup.state === "CANCELLED" ? "Setup was cancelled." : "Some dependencies could not be set up:"}</strong>
-            <ul>
-              {setup.failures.slice(0, 20).map((f, i) => (
-                <li key={i}>{f}</li>
-              ))}
-              {setup.failures.length > 20 && <li>… and {setup.failures.length - 20} more</li>}
-            </ul>
+        {dep.installing && setup && (
+          <div className="dep-progress">
+            <div className="dep-progress-bar" role="progressbar" aria-label="Setup progress" aria-valuemin={0} aria-valuemax={100}
+              aria-valuenow={setup.percent}>
+              <span style={{ width: `${setup.percent}%` }} />
+            </div>
+            <div className="dep-progress-row">
+              <span className="dep-progress-phase" title={setup.current ?? undefined}>
+                {setup.unitCount > 0 ? `Step ${Math.min(setup.unitIndex + 1, setup.unitCount)} of ${setup.unitCount} · ` : ""}
+                {setup.current ?? setup.phase}
+              </span>
+              <span>
+                {setup.installed} installed{setup.failed > 0 ? ` · ${setup.failed} failed` : ""} · {setup.percent}%
+              </span>
+            </div>
+            <div className="dep-progress-actions">
+              <button type="button" className="btn ghost small" onClick={dep.openProgress}>Show Progress</button>
+              <button type="button" className="btn ghost small" onClick={dep.cancelSetup}>Cancel</button>
+            </div>
           </div>
         )}
-        {finished && setup.state === "SUCCEEDED" && dep.indicator === "ok" && (
-          <p className="dep-done">
-            <CheckMark size={12} /> Setup finished - all dependencies are installed.
-          </p>
+
+        {finished && (
+          <div className={`dep-last-run ${setup.state === "SUCCEEDED" ? "ok" : "bad"}`}>
+            {setup.state === "SUCCEEDED" ? <CheckMark size={12} /> : <CrossMark size={11} />}
+            <span>
+              {setup.state === "SUCCEEDED"
+                ? `Setup finished: ${setup.installed} packages installed, all dependencies are in place.` +
+                  (setup.changes.length ? ` ${setup.changes.length} version${setup.changes.length === 1 ? " was" : "s were"} updated in your files.` : "")
+                : setup.state === "CANCELLED"
+                  ? `Setup was cancelled after ${setup.installed} packages.`
+                  : `Setup finished: ${setup.installed} installed, ${setup.failures.length} could not be set up.`}
+            </span>
+            <button type="button" className="btn ghost small" onClick={dep.openProgress}>View Details</button>
+          </div>
         )}
         {dep.error && dep.indicator !== "error" && <div className="alert" role="alert">{dep.error}</div>}
       </div>

@@ -14,6 +14,11 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.Set;
+import java.net.Socket;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLSocketFactory;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * HTTPS downloads for the installers: only {@code https} (and {@code http} to localhost, for tests) is fetched,
@@ -32,10 +37,116 @@ public class Downloader {
     private static final String USER_AGENT = "ORBIT-dependency-setup/1.0";
     private static final int ATTEMPTS = 3;
 
+    /** Thrown when the user cancelled while a download was running. */
+    public static class CancelledException extends IOException {
+        public CancelledException() {
+            super("Setup cancelled");
+        }
+    }
+
     private final long maxBytes;
+    private final java.util.function.BooleanSupplier cancelled;
+    /** The plain TCP sockets under this downloader's TLS connections: closing one ends a blocked read at once. */
+    private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
+    private final SSLSocketFactory tls = new TrackingSocketFactory((SSLSocketFactory) SSLSocketFactory.getDefault(), sockets);
 
     public Downloader(long maxBytes) {
+        this(maxBytes, () -> false);
+    }
+
+    public Downloader(long maxBytes, java.util.function.BooleanSupplier cancelled) {
         this.maxBytes = maxBytes;
+        this.cancelled = cancelled;
+    }
+
+    /**
+     * Ends every download in flight at once (used when the user cancels): the TCP sockets under the TLS connections are
+     * closed, so a read blocked on a slow registry fails immediately. Never blocks - closing a plain socket does not
+     * wait for the thread that is reading from it (HttpURLConnection.disconnect() would).
+     */
+    public void abortAll() {
+        for (Socket s : sockets) {
+            try {
+                s.close();
+            } catch (IOException | RuntimeException ignored) {
+                // already closed
+            }
+        }
+        sockets.clear();
+    }
+
+    /** Hands out the platform's TLS sockets and remembers the plain socket each one runs on. */
+    private static final class TrackingSocketFactory extends SSLSocketFactory {
+        private final SSLSocketFactory delegate;
+        private final Set<Socket> sockets;
+
+        TrackingSocketFactory(SSLSocketFactory delegate, Set<Socket> sockets) {
+            this.delegate = delegate;
+            this.sockets = sockets;
+        }
+
+        private Socket track(Socket raw, Socket result) {
+            sockets.removeIf(Socket::isClosed);
+            sockets.add(raw);
+            return result;
+        }
+
+        @Override
+        public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
+            return track(s, delegate.createSocket(s, host, port, autoClose)); // HttpsURLConnection layers TLS on its own socket
+        }
+
+        @Override
+        public Socket createSocket() throws IOException {
+            Socket s = delegate.createSocket();
+            return track(s, s);
+        }
+
+        @Override
+        public Socket createSocket(String host, int port) throws IOException {
+            Socket s = delegate.createSocket(host, port);
+            return track(s, s);
+        }
+
+        @Override
+        public Socket createSocket(String host, int port, java.net.InetAddress localHost, int localPort) throws IOException {
+            Socket s = delegate.createSocket(host, port, localHost, localPort);
+            return track(s, s);
+        }
+
+        @Override
+        public Socket createSocket(java.net.InetAddress host, int port) throws IOException {
+            Socket s = delegate.createSocket(host, port);
+            return track(s, s);
+        }
+
+        @Override
+        public Socket createSocket(java.net.InetAddress address, int port, java.net.InetAddress localAddress, int localPort)
+                throws IOException {
+            Socket s = delegate.createSocket(address, port, localAddress, localPort);
+            return track(s, s);
+        }
+
+        @Override
+        public String[] getDefaultCipherSuites() {
+            return delegate.getDefaultCipherSuites();
+        }
+
+        @Override
+        public String[] getSupportedCipherSuites() {
+            return delegate.getSupportedCipherSuites();
+        }
+    }
+
+    /** The TLS socket factory of this downloader (package-private for tests). */
+    SSLSocketFactory socketFactory() {
+        return tls;
+    }
+
+    private void checkCancelled() throws CancelledException {
+        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+            throw new CancelledException();
+        }
     }
 
     static void requireAllowed(URI uri) throws IOException {
@@ -64,11 +175,15 @@ public class Downloader {
         requireAllowed(uri);
         IOException last = null;
         for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
+            checkCancelled();
             Path part = target.resolveSibling(target.getFileName() + ".part");
             HttpURLConnection con = null;
             try {
                 // HttpURLConnection (HTTP/1.1) has a real per-read timeout: a stalled registry fails instead of hanging
                 con = (HttpURLConnection) uri.toURL().openConnection();
+                if (con instanceof HttpsURLConnection https) {
+                    https.setSSLSocketFactory(tls);
+                }
                 con.setConnectTimeout((int) Duration.ofSeconds(20).toMillis());
                 con.setReadTimeout((int) Duration.ofSeconds(60).toMillis());
                 con.setInstanceFollowRedirects(true);
@@ -94,6 +209,7 @@ public class Downloader {
                         long total = 0;
                         int n;
                         while ((n = in.read(buf)) > 0) {
+                            checkCancelled();
                             total += n;
                             if (total > maxBytes) {
                                 throw new NotFoundException("Download is larger than " + (maxBytes >> 20) + " MB: " + url);
@@ -102,9 +218,10 @@ public class Downloader {
                         }
                     }
                 }
+                checkCancelled();
                 Files.move(part, target, StandardCopyOption.REPLACE_EXISTING);
                 return;
-            } catch (NotFoundException e) {
+            } catch (NotFoundException | CancelledException e) {
                 Files.deleteIfExists(part);
                 throw e;
             } catch (java.net.URISyntaxException e) {
@@ -112,6 +229,7 @@ public class Downloader {
             } catch (IOException e) {
                 Files.deleteIfExists(part);
                 last = e;
+                checkCancelled(); // a connection closed by abortAll() ends here: no retry
                 if (Thread.currentThread().isInterrupted()) {
                     throw new IOException("Download interrupted");
                 }

@@ -1,7 +1,11 @@
 package com.orbit.backend.service;
 
 import com.orbit.backend.dto.request.CloneProjectRequest;
+import com.orbit.backend.dto.request.CreateEntryRequest;
 import com.orbit.backend.dto.request.CreateProjectRequest;
+import com.orbit.backend.dto.request.RenameEntryRequest;
+import com.orbit.backend.dto.request.SaveFileRequest;
+import com.orbit.backend.dto.response.FileContentResponse;
 import com.orbit.backend.dto.response.ProjectConfigResponse;
 import com.orbit.backend.dto.response.ProjectInspectResponse;
 import com.orbit.backend.dto.response.ProjectResponse;
@@ -200,6 +204,32 @@ public class ProjectService {
     public ProjectTreeResponse tree(UUID userId, UUID projectId, String relativePath) {
         Project project = find(userId, projectId);
         return fileService.list(pathResolver.resolve(project.getLocation()).path(), relativePath);
+    }
+
+    public FileContentResponse readFile(UUID userId, UUID projectId, String relativePath) {
+        return fileService.readFile(projectRoot(userId, projectId), relativePath);
+    }
+
+    public FileContentResponse saveFile(UUID userId, UUID projectId, SaveFileRequest request) {
+        return fileService.saveFile(projectRoot(userId, projectId), request.path(), request.content(), request.bom(),
+                request.expectedLastModified());
+    }
+
+    public ProjectTreeResponse.Entry createEntry(UUID userId, UUID projectId, CreateEntryRequest request) {
+        return fileService.create(projectRoot(userId, projectId), request.parent(), request.name(), request.kind());
+    }
+
+    public ProjectTreeResponse.Entry renameEntry(UUID userId, UUID projectId, RenameEntryRequest request) {
+        return fileService.rename(projectRoot(userId, projectId), request.path(), request.newName());
+    }
+
+    public void deleteEntry(UUID userId, UUID projectId, String relativePath) {
+        fileService.delete(projectRoot(userId, projectId), relativePath);
+        log.info("User {} deleted '{}' in project {}", userId, relativePath, projectId);
+    }
+
+    private Path projectRoot(UUID userId, UUID projectId) {
+        return pathResolver.resolve(find(userId, projectId).getLocation()).path();
     }
 
     public ProjectInspectResponse inspect(String location) {

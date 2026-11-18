@@ -168,6 +168,9 @@ public final class NpmSupport implements EcosystemSupport {
             }
         });
         boolean workspaceRoot = !all.get(root).workspaces().isEmpty();
+        CodeUsage usage = ctx.usage(files.root());
+        JsonNode lockPackages = lockPackages(files.root(), root);
+        int unused = 0;
         List<Item> items = new ArrayList<>();
         for (String section : List.of("dependencies", "devDependencies")) {
             JsonNode deps = m.json().get(section);
@@ -178,20 +181,29 @@ public final class NpmSupport implements EcosystemSupport {
             for (var e : deps.properties()) {
                 String name = e.getKey();
                 String raw = e.getValue().isString() ? e.getValue().asString() : "";
-                items.add(checkOne(files.root(), unit.key(), name, raw, scope,
-                        workspaceRoot && localNames.contains(name)));
+                Item item = checkOne(files.root(), unit.key(), name, raw, scope, workspaceRoot && localNames.contains(name));
+                if (item.state().needsSetup() && !used(usage, files.root(), unit.key(), name, lockPackages)) {
+                    item = new Item(name, raw, item.installed(), scope, DependencyState.UNUSED,
+                            "not imported or run anywhere in the code - not downloaded");
+                    unused++;
+                }
+                items.add(item);
             }
         }
         String message = null;
         boolean extra = false;
         if (root.equals(unit.key())) {
-            LockStats stats = lockStats(files.root(), root, ctx.platform());
+            LockStats stats = lockStats(files.root(), root, ctx.platform(), usage);
             if (stats != null && stats.missing() > 0) {
                 extra = true;
-                message = stats.missing() + " of " + stats.total() + " packages listed in package-lock.json are not installed";
+                message = stats.missing() + " of " + stats.total() + " packages the code needs (from package-lock.json) are not installed";
             }
         } else {
             message = "Installed with the workspace root " + (root.isEmpty() ? "package.json" : root + "/package.json");
+        }
+        if (unused > 0) {
+            String note = unused + (unused == 1 ? " dependency is" : " dependencies are") + " not used by the code and not downloaded";
+            message = message == null ? note : message + ". " + note;
         }
         return DependencyReport.Unit.of(Ecosystem.NPM, manifest, ProjectFiles.join(root, "node_modules"), message, items, extra);
     }
@@ -254,7 +266,11 @@ public final class NpmSupport implements EcosystemSupport {
     }
 
     static LockStats lockStats(Path projectRoot, String root, TargetPlatform platform) {
-        Optional<List<LockEntry>> entries = lockEntries(projectRoot, root, platform);
+        return lockStats(projectRoot, root, platform, CodeUsage.everything());
+    }
+
+    static LockStats lockStats(Path projectRoot, String root, TargetPlatform platform, CodeUsage usage) {
+        Optional<List<LockEntry>> entries = lockEntries(projectRoot, root, platform, usage);
         if (entries.isEmpty()) {
             return null;
         }
@@ -285,6 +301,49 @@ public final class NpmSupport implements EcosystemSupport {
 
     /** The packages of package-lock.json (v1, v2 and v3) that belong on this platform; empty without a lockfile. */
     static Optional<List<LockEntry>> lockEntries(Path projectRoot, String root, TargetPlatform platform) {
+        return lockEntries(projectRoot, root, platform, CodeUsage.everything());
+    }
+
+    /** The {@code packages} object of the install root's package-lock.json (v2 / v3), or null. */
+    static JsonNode lockPackages(Path projectRoot, String root) {
+        Path lock = lockFile(projectRoot, root);
+        if (lock == null) {
+            return null;
+        }
+        try {
+            JsonNode p = InstallContext.json(Files.readString(lock)).map(j -> j.get("packages")).orElse(null);
+            return p != null && p.isObject() ? p : null;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** Whether the code under {@code dir} uses npm package {@code name} (imports, scripts with its commands, configs). */
+    static boolean used(CodeUsage usage, Path projectRoot, String dir, String name, JsonNode lockPackages) {
+        List<String> bins = new ArrayList<>();
+        JsonNode bin = null;
+        if (lockPackages != null) {
+            bin = lockPackages.path("node_modules/" + name).get("bin"); // hoisted to the install root
+        }
+        if (bin == null) {
+            Path pkg = projectRoot.resolve(ProjectFiles.join(ProjectFiles.join(dir, "node_modules"), name)).resolve("package.json");
+            try {
+                if (Files.isRegularFile(pkg)) {
+                    bin = InstallContext.json(Files.readString(pkg)).map(j -> j.get("bin")).orElse(null);
+                }
+            } catch (IOException ignored) {
+                // no bin
+            }
+        }
+        if (bin != null && bin.isObject()) {
+            bin.properties().forEach(e -> bins.add(e.getKey()));
+        } else if (bin != null && bin.isString()) {
+            bins.add(name.substring(name.indexOf('/') + 1));
+        }
+        return usage.jsUsed(dir, name, bins);
+    }
+
+    static Optional<List<LockEntry>> lockEntries(Path projectRoot, String root, TargetPlatform platform, CodeUsage usage) {
         Path lock = lockFile(projectRoot, root);
         if (lock == null) {
             return Optional.empty();
@@ -301,7 +360,8 @@ public final class NpmSupport implements EcosystemSupport {
         List<LockEntry> out = new ArrayList<>();
         JsonNode packages = json.get("packages");
         if (packages != null && packages.isObject()) {
-            Set<String> needed = reachable(packages, platform);
+            Set<String> needed = reachable(packages, platform, (from, dep) ->
+                    used(usage, projectRoot, from.isEmpty() ? root : ProjectFiles.join(root, from), dep, packages));
             for (var e : packages.properties()) {
                 String path = e.getKey();
                 JsonNode p = e.getValue();
@@ -360,6 +420,15 @@ public final class NpmSupport implements EcosystemSupport {
      * Null when the lockfile has no dependency information to follow.
      */
     static Set<String> reachable(JsonNode packages, TargetPlatform platform) {
+        return reachable(packages, platform, (from, dep) -> true);
+    }
+
+    /**
+     * Like {@link #reachable(JsonNode, TargetPlatform)}, following a dependency of the project (or of a workspace
+     * package) only when {@code follow(workspacePath, name)} says the code uses it: what only unused dependencies
+     * pull in is left out.
+     */
+    static Set<String> reachable(JsonNode packages, TargetPlatform platform, java.util.function.BiPredicate<String, String> follow) {
         Deque<String> queue = new ArrayDeque<>();
         Set<String> seen = new LinkedHashSet<>();
         for (var e : packages.properties()) {
@@ -390,6 +459,9 @@ public final class NpmSupport implements EcosystemSupport {
                     continue;
                 }
                 for (var d : deps.properties()) {
+                    if (isRoot && !follow.test(path, d.getKey())) {
+                        continue; // declared, but the code never uses it
+                    }
                     String target = resolveInLock(packages, path, d.getKey());
                     if (target != null && platformMatches(packages.path(target), platform) && seen.add(target)) {
                         queue.add(target);
@@ -464,14 +536,38 @@ public final class NpmSupport implements EcosystemSupport {
         if (rootManifest == null) {
             throw new IOException("package.json could not be read");
         }
-        Optional<List<LockEntry>> lock = lockEntries(files.root(), root, ctx.platform());
+        CodeUsage usage = ctx.skipUnused() ? ctx.usage(files.root()) : CodeUsage.everything();
+        Optional<List<LockEntry>> lock = lockEntries(files.root(), root, ctx.platform(), usage);
         List<LockEntry> plan;
         if (lock.isPresent()) {
             ctx.progress().log("Installing from " + (root.isEmpty() ? "" : root + "/") + "package-lock.json");
+            ctx.progress().step("Reading package-lock.json", 0, 0);
             plan = lock.get();
+            JsonNode packages = lockPackages(files.root(), root);
+            Set<String> skipped = new java.util.TreeSet<>();
+            for (Manifest m : all.values()) {
+                if (!installRoot(all, m.dir()).equals(root)) {
+                    continue;
+                }
+                for (String section : List.of("dependencies", "devDependencies", "optionalDependencies")) {
+                    JsonNode deps = m.json().get(section);
+                    if (deps != null && deps.isObject()) {
+                        for (var e : deps.properties()) {
+                            if (!used(usage, files.root(), m.dir(), e.getKey(), packages)) {
+                                skipped.add(e.getKey());
+                            }
+                        }
+                    }
+                }
+            }
+            if (!skipped.isEmpty()) {
+                ctx.progress().log("Not used by the code, not downloaded (" + skipped.size() + ", with what only they need): "
+                        + String.join(", ", skipped));
+            }
         } else {
             ctx.progress().log("No package-lock.json: resolving versions with the npm registry");
-            plan = resolve(all, rootManifest, ctx);
+            ctx.progress().step("Resolving versions with the npm registry", 0, 0);
+            plan = resolve(all, rootManifest, ctx, usage, files.root());
         }
         Path base = files.root().resolve(root);
         List<LockEntry> todo = plan.stream().filter(e -> !installedVersionIs(base.resolve(e.path()), e.version())).toList();
@@ -483,10 +579,11 @@ public final class NpmSupport implements EcosystemSupport {
                 ctx.checkCancelled();
                 try {
                     fetch(base, e, ctx);
+                    ctx.installed(e.name() + "@" + e.version(), done.incrementAndGet(), todo.size());
                 } catch (IOException ex) {
                     ctx.fail(e.name() + "@" + e.version() + ": " + ex.getMessage());
+                    ctx.progress().step(e.name() + "@" + e.version(), done.incrementAndGet(), todo.size());
                 }
-                ctx.progress().step(e.name() + "@" + e.version(), done.incrementAndGet(), todo.size());
                 return null;
             });
         }
@@ -530,13 +627,15 @@ public final class NpmSupport implements EcosystemSupport {
      * Resolves the dependency tree like npm without a lockfile: the newest version in range (dist-tag latest when it
      * fits), placed as high up in node_modules as possible and nested below its dependent on a version conflict.
      */
-    private List<LockEntry> resolve(Map<String, Manifest> all, Manifest root, InstallContext ctx) throws IOException {
+    private List<LockEntry> resolve(Map<String, Manifest> all, Manifest root, InstallContext ctx, CodeUsage usage,
+                                    Path projectRoot) throws IOException {
         Map<String, JsonNode> packuments = new ConcurrentHashMap<>();
         // node_modules folder (relative to the install root) -> package name -> chosen version
         Map<String, Map<String, String>> placed = new HashMap<>();
         Map<String, LockEntry> plan = new LinkedHashMap<>();
         Deque<Want> queue = new ArrayDeque<>();
 
+        Set<String> skipped = new java.util.TreeSet<>();
         List<Manifest> members = new ArrayList<>();
         members.add(root);
         Set<String> localNames = new LinkedHashSet<>();
@@ -560,16 +659,23 @@ public final class NpmSupport implements EcosystemSupport {
                     if (members.size() > 1 && localNames.contains(e.getKey())) {
                         continue;
                     }
+                    if (!used(usage, projectRoot, m.dir(), e.getKey(), null)) {
+                        skipped.add(e.getKey());
+                        continue;
+                    }
                     enqueue(queue, "", e.getKey(), e.getValue().asString(""), section.startsWith("optional"), ctx);
                 }
             }
+        }
+        if (!skipped.isEmpty()) {
+            ctx.progress().log("Not used by the code, not downloaded (" + skipped.size() + "): " + String.join(", ", skipped));
         }
         int processed = 0;
         while (!queue.isEmpty()) {
             ctx.checkCancelled();
             Want w = queue.poll();
             if (++processed % 25 == 0) {
-                ctx.progress().step("resolving " + w.target(), plan.size(), Math.max(plan.size() + queue.size(), 1));
+                ctx.progress().step("Resolving versions: " + plan.size() + " packages so far (" + w.target() + ")", 0, 0);
             }
             if (alreadySatisfied(placed, w)) {
                 continue;

@@ -16,13 +16,23 @@ export interface Dependencies {
   installing: boolean;
   error: string | null;
   confirmOpen: boolean;
+  /** Live progress of the Dependency Check while it runs (null otherwise). */
+  checkProgress: DependencySetupProgress | null;
+  /** The progress window of Setup Dependencies is shown. */
+  progressOpen: boolean;
+  openProgress: () => void;
+  closeProgress: () => void;
   /** The Dependency Check button. */
   runCheck: () => void;
   /** Setup Dependencies: opens the confirmation window first. */
   askSetup: () => void;
   closeConfirm: () => void;
-  /** Called by the confirmation window's confirm button. */
-  confirmSetup: () => Promise<void>;
+  /**
+   * Called by the confirmation window's confirm button. `updateManifests`: when a pinned version cannot be installed,
+   * install a newer one that can and update the requirements file. `skipUnused`: do not download declared
+   * dependencies the source code never uses.
+   */
+  confirmSetup: (updateManifests: boolean, skipUnused?: boolean) => Promise<void>;
   cancelSetup: () => void;
 }
 
@@ -38,6 +48,8 @@ export function useDependencies(projectId: string | null): Dependencies {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [checkProgress, setCheckProgress] = useState<DependencySetupProgress | null>(null);
+  const [progressOpen, setProgressOpen] = useState(false);
   const current = useRef(projectId);
   const pollTimer = useRef<number | null>(null);
 
@@ -53,13 +65,30 @@ export function useDependencies(projectId: string | null): Dependencies {
     if (!id) return;
     setChecking(true);
     setError(null);
+    setCheckProgress({ kind: "CHECK", state: "RUNNING", phase: "Starting…", current: null, percent: 0, unitIndex: 0, unitCount: 0,
+      steps: [], installed: 0, failed: 0, changes: [], startedAt: null, finishedAt: null, failures: [], log: [] });
+    // the check request stays open until it is done: ask the server how far it is meanwhile
+    let polling = true;
+    const timer = window.setInterval(() => {
+      api
+        .dependencyCheckProgress(id)
+        .then((p) => {
+          if (polling && current.current === id && p.state === "RUNNING") setCheckProgress(p);
+        })
+        .catch(() => undefined);
+    }, 250);
     try {
       const result = await api.runDependencyCheck(id);
       if (current.current === id) setCheck(result);
     } catch (e) {
       if (current.current === id) setError(e instanceof ApiError ? e.message : "The dependencies could not be checked.");
     } finally {
-      if (current.current === id) setChecking(false);
+      polling = false;
+      window.clearInterval(timer);
+      if (current.current === id) {
+        setChecking(false);
+        setCheckProgress(null);
+      }
     }
   }, []);
 
@@ -97,6 +126,8 @@ export function useDependencies(projectId: string | null): Dependencies {
     setError(null);
     setChecking(false);
     setConfirmOpen(false);
+    setCheckProgress(null);
+    setProgressOpen(false);
     if (!projectId) return;
     const id = projectId;
     setLoading(true);
@@ -118,19 +149,21 @@ export function useDependencies(projectId: string | null): Dependencies {
     return stopPolling;
   }, [projectId, poll, runCheck, stopPolling]);
 
-  const confirmSetup = useCallback(async () => {
+  const confirmSetup = useCallback(async (updateManifests: boolean, skipUnused = true) => {
     const id = current.current;
     if (!id) return;
     setError(null);
     try {
-      const started = await api.startDependencySetup(id);
+      const started = await api.startDependencySetup(id, updateManifests, skipUnused);
       if (current.current !== id) return;
       setSetup(started);
       setConfirmOpen(false);
+      setProgressOpen(true); // show what happens while it downloads
       poll(id);
     } catch (e) {
       if (e instanceof ApiError && e.code === "DEPENDENCY_SETUP_RUNNING") {
         setConfirmOpen(false);
+        setProgressOpen(true);
         poll(id); // already running (other tab): just follow it
         return;
       }
@@ -163,6 +196,10 @@ export function useDependencies(projectId: string | null): Dependencies {
     installing,
     error,
     confirmOpen,
+    checkProgress,
+    progressOpen,
+    openProgress: () => setProgressOpen(true),
+    closeProgress: () => setProgressOpen(false),
     runCheck: () => void runCheck(),
     askSetup: () => setConfirmOpen(true),
     closeConfirm: () => setConfirmOpen(false),

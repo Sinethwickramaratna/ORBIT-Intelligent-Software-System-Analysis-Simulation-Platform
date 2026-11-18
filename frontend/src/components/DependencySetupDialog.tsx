@@ -8,7 +8,7 @@ interface Props {
   location: string;
   check: DependencyCheck;
   onCancel: () => void;
-  onConfirm: () => Promise<void>;
+  onConfirm: (updateManifests: boolean, skipUnused: boolean) => Promise<void>;
 }
 
 const REGISTRY: Record<string, string> = {
@@ -24,8 +24,12 @@ const REGISTRY: Record<string, string> = {
 export default function DependencySetupDialog({ projectName, location, check, onCancel, onConfirm }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowUpdates, setAllowUpdates] = useState(true);
+  const [includeUnused, setIncludeUnused] = useState(false);
+  const unused = check.units.flatMap((u) => u.dependencies.filter((d) => d.state === "UNUSED" && !d.installed));
   const confirmRef = useRef<HTMLButtonElement>(null);
   const units = check.units.filter((u) => u.missing > 0 || u.status === "MISSING");
+  const hasPython = units.some((u) => u.ecosystem === "pip");
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -43,7 +47,7 @@ export default function DependencySetupDialog({ projectName, location, check, on
     setBusy(true);
     setError(null);
     try {
-      await onConfirm();
+      await onConfirm(allowUpdates, !includeUnused);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Setup could not be started.");
       setBusy(false);
@@ -79,9 +83,40 @@ export default function DependencySetupDialog({ projectName, location, check, on
           </ul>
           <p className="hint">
             The packages (with the packages they depend on) are downloaded and saved in the project folder{" "}
-            <code>{location}</code>, built for <strong>{check.targetPlatform}</strong>. Your own files are not changed;
-            install scripts of packages are not run. This can take a few minutes for large projects.
+            <code>{location}</code>, built for <strong>{check.targetPlatform}</strong>. Install scripts of packages are
+            not run. This can take a few minutes for large projects.
           </p>
+          {hasPython && (
+            <p className="hint">
+              Python packages go into the project&apos;s virtual environment (an existing one, or a new <code>.venv</code>{" "}
+              next to the requirements), never into the Python installed on the computer.
+            </p>
+          )}
+          {unused.length > 0 && (
+            <label className="check dep-update-option">
+              <input type="checkbox" checked={includeUnused} onChange={(e) => setIncludeUnused(e.target.checked)} disabled={busy} />
+              <span>
+                Also download the <strong>{unused.length}</strong> declared{" "}
+                {unused.length === 1 ? "dependency" : "dependencies"} the code does not use (
+                <span className="dep-unused-names" title={unused.map((d) => d.name).join(", ")}>
+                  {unused.slice(0, 6).map((d) => d.name).join(", ")}
+                  {unused.length > 6 ? `, … ${unused.length - 6} more` : ""}
+                </span>
+                ). Not needed to reconstruct the architecture.
+              </span>
+            </label>
+          )}
+          {hasPython && (
+            <label className="check dep-update-option">
+              <input type="checkbox" checked={allowUpdates} onChange={(e) => setAllowUpdates(e.target.checked)} disabled={busy} />
+              <span>
+                If a pinned version cannot be installed on {check.targetPlatform}, install the newest version that works
+                (same major version first) and update the line in <code>requirements.txt</code>. The original file is kept
+                as <code>requirements.txt.orbit-backup</code>.
+              </span>
+            </label>
+          )}
+          {!(hasPython && allowUpdates) && <p className="hint">Your own files are not changed.</p>}
           {error && <div className="alert" role="alert">{error}</div>}
         </div>
 

@@ -112,6 +112,17 @@ export interface TreeEntry {
   hasChildren: boolean;
 }
 
+/** A text file opened in the editor (`content` is null on a save response). */
+export interface FileContent {
+  path: string;
+  name: string;
+  content: string | null;
+  size: number;
+  lastModified: number;
+  bom: boolean;
+  lineEnding: "LF" | "CRLF";
+}
+
 export interface ProjectTree {
   path: string;
   entries: TreeEntry[];
@@ -176,7 +187,8 @@ export interface ProjectScan {
 }
 
 /** One declared dependency of a manifest group, as the dependency check saw it. */
-export type DependencyState = "INSTALLED" | "MISSING" | "OUTDATED" | "LOCAL" | "SDK" | "UNSUPPORTED";
+/** UNUSED: declared, but the source code never uses it - not downloaded (does not make the check red). */
+export type DependencyState = "INSTALLED" | "MISSING" | "OUTDATED" | "LOCAL" | "SDK" | "UNSUPPORTED" | "UNUSED";
 
 export interface DependencyItem {
   name: string;
@@ -219,12 +231,41 @@ export interface DependencyCheck {
 
 export type DependencySetupState = "IDLE" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
 
+/** One manifest group of a check / setup run. */
+export interface DependencyProgressStep {
+  title: string;
+  state: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+  /** What happened, once the step has finished ("12 installed", "2 packages failed", ...). */
+  summary: string | null;
+}
+
+/** A version changed in a project file, e.g. requirements.txt: pyyaml ==5.3.1 -> ==6.0.2. */
+export interface DependencyChange {
+  file: string;
+  dependency: string;
+  from: string | null;
+  to: string;
+  reason: string;
+}
+
+/** Progress of a Dependency Check (`kind` CHECK) or of Setup Dependencies (`kind` SETUP). */
 export interface DependencySetupProgress {
+  kind: "CHECK" | "SETUP";
   state: DependencySetupState;
+  /** What is happening, e.g. "Node.js (npm) - package.json". */
   phase: string | null;
+  /** The package being worked on right now, e.g. "react@18.3.1". */
+  current: string | null;
   percent: number;
   unitIndex: number;
   unitCount: number;
+  steps: DependencyProgressStep[];
+  /** Packages downloaded and saved so far. */
+  installed: number;
+  /** Packages that could not be set up. */
+  failed: number;
+  /** Versions ORBIT changed in project files because the requested one could not be installed. */
+  changes: DependencyChange[];
   startedAt: string | null;
   finishedAt: string | null;
   failures: string[];
@@ -399,6 +440,20 @@ export const api = {
     authed<FolderBrowse>("/api/projects/browse/folder", { method: "POST", body: JSON.stringify({ parent, name }) }),
   projectTree: (projectId: string, path = "") =>
     authed<ProjectTree>(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`),
+  /** Opens a UTF-8 text file of the project for the editor. */
+  readFile: (projectId: string, path: string) =>
+    authed<FileContent>(`/api/projects/${projectId}/file?path=${encodeURIComponent(path)}`),
+  /** Saves a file. With `expectedLastModified` the save fails (409 FILE_CHANGED_ON_DISK) when the file changed meanwhile. */
+  saveFile: (projectId: string, input: { path: string; content: string; bom: boolean; expectedLastModified: number | null }) =>
+    authed<FileContent>(`/api/projects/${projectId}/file`, { method: "PUT", body: JSON.stringify(input) }),
+  /** New file or folder inside `parent` ("" = the project root). */
+  createEntry: (projectId: string, parent: string, name: string, kind: TreeEntry["kind"]) =>
+    authed<TreeEntry>(`/api/projects/${projectId}/files`, { method: "POST", body: JSON.stringify({ parent, name, kind }) }),
+  renameEntry: (projectId: string, path: string, newName: string) =>
+    authed<TreeEntry>(`/api/projects/${projectId}/files/rename`, { method: "POST", body: JSON.stringify({ path, newName }) }),
+  /** Deletes a file, or a folder with everything in it, from disk. */
+  deleteEntry: (projectId: string, path: string) =>
+    authed<void>(`/api/projects/${projectId}/files?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
   /** The Scan button: reads the project folder again and stores a new scan. */
   scanProject: (projectId: string) => authed<ProjectScan>(`/api/projects/${projectId}/scan`, { method: "POST" }),
   /** Progress of the scan that is running right now (poll it while `scanProject` is pending). */
@@ -411,9 +466,15 @@ export const api = {
   /** The Dependency Check button: checks the project folder now. */
   runDependencyCheck: (projectId: string) =>
     authed<DependencyCheck>(`/api/projects/${projectId}/dependencies/check`, { method: "POST" }),
+  /** Progress of the running (or last) Dependency Check; poll it while `runDependencyCheck` is pending. */
+  dependencyCheckProgress: (projectId: string) =>
+    authed<DependencySetupProgress>(`/api/projects/${projectId}/dependencies/check/progress`),
   /** Setup Dependencies (after the user confirmed): starts the downloads and answers at once. */
-  startDependencySetup: (projectId: string) =>
-    authed<DependencySetupProgress>(`/api/projects/${projectId}/dependencies/setup`, { method: "POST" }),
+  startDependencySetup: (projectId: string, updateManifests = true, skipUnused = true) =>
+    authed<DependencySetupProgress>(`/api/projects/${projectId}/dependencies/setup`, {
+      method: "POST",
+      body: JSON.stringify({ updateManifests, skipUnused }),
+    }),
   /** Progress of Setup Dependencies; poll until `state` is no longer RUNNING. */
   dependencySetupProgress: (projectId: string) =>
     authed<DependencySetupProgress>(`/api/projects/${projectId}/dependencies/setup/progress`),

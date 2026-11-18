@@ -18,7 +18,7 @@ public final class DependencyCli {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || !(args[0].equals("check") || args[0].equals("setup"))) {
-            System.err.println("usage: check|setup <project folder> [windows|mac|linux]");
+            System.err.println("usage: check|setup <project folder> [windows|mac|linux] [--no-update] [--all]");
             System.exit(2);
             return;
         }
@@ -46,8 +46,9 @@ public final class DependencyCli {
                 public void log(String line) {
                     System.out.println("  " + line);
                 }
-            });
+            }, !java.util.Arrays.asList(args).contains("--no-update"), !java.util.Arrays.asList(args).contains("--all"));
             report = r.after();
+            r.changes().forEach(c -> System.out.println("  changed " + c.file() + ": " + c.dependency() + " " + c.from() + " -> " + c.to()));
             r.failures().forEach(f -> System.out.println("  failed: " + f));
         }
         print(report);

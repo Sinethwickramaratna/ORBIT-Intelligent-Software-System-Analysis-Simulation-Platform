@@ -103,7 +103,7 @@ class DependencyCheckerTest {
         Unit u = unit(check(), Ecosystem.NPM, "package.json");
         assertThat(item(u, "esbuild").state()).isEqualTo(DependencyState.INSTALLED);
         assertThat(u.status()).isEqualTo(Status.MISSING);
-        assertThat(u.message()).isEqualTo("1 of 2 packages listed in package-lock.json are not installed"); // linux one skipped
+        assertThat(u.message()).isEqualTo("1 of 2 packages the code needs (from package-lock.json) are not installed"); // linux one skipped
         write("node_modules/@esbuild/win32-x64/package.json", "{\"version\":\"0.20.0\"}");
         assertThat(unit(check(), Ecosystem.NPM, "package.json").status()).isEqualTo(Status.INSTALLED);
     }
@@ -132,7 +132,7 @@ class DependencyCheckerTest {
         Files.delete(project.resolve("node_modules/@rolldown/binding-win32-x64-msvc/package.json"));
         Unit again = unit(check(), Ecosystem.NPM, "package.json");
         assertThat(again.status()).isEqualTo(Status.MISSING);
-        assertThat(again.message()).isEqualTo("1 of 2 packages listed in package-lock.json are not installed");
+        assertThat(again.message()).isEqualTo("1 of 2 packages the code needs (from package-lock.json) are not installed");
     }
 
     // ------------------------------------------------------------------------------------------ Python
@@ -185,6 +185,52 @@ class DependencyCheckerTest {
         assertThat(PythonSupport.poetryToPep440("^0.2.3")).isEqualTo(">=0.2.3,<0.3");
         assertThat(PythonSupport.poetryToPep440("~1.2.3")).isEqualTo(">=1.2.3,<1.3");
         assertThat(PythonSupport.poetryToPep440("1.2.3")).isEqualTo("==1.2.3");
+    }
+
+    @Test
+    void pythonRequirementLinesAreRewrittenKeepingExtrasMarkersAndComments() {
+        String why = "no ready-made package (wheel) for Windows / Python 3.12";
+        assertThat(PythonSupport.rewriteRequirement("numpy==1.21.0", "numpy", "1.26.4", "==1.21.0", why))
+                .isEqualTo("numpy==1.26.4  # updated by ORBIT: was ==1.21.0 - " + why);
+        assertThat(PythonSupport.rewriteRequirement("  Pillow[webp] >=8,<9 ; sys_platform == 'win32'   # images", "pillow", "9.5.0",
+                ">=8,<9", why))
+                .isEqualTo("  Pillow[webp]==9.5.0 ; sys_platform == 'win32'  # images (updated by ORBIT: was >=8,<9 - " + why + ")");
+        assertThat(PythonSupport.rewriteRequirement("requests", "requests", "2.32.3", "", why))
+                .startsWith("requests==2.32.3  # updated by ORBIT: was unpinned");
+        assertThat(PythonSupport.rewriteRequirement("django==4.2", "numpy", "1.26.4", "==1.21.0", why)).isNull(); // other package
+    }
+
+    @Test
+    void pythonNewerVersionPrefersTheSameMajorVersion() {
+        List<com.orbit.backend.deps.version.Pep440.Version> installable = java.util.stream.Stream
+                .of("1.14.0", "1.16.0", "1.17.1", "2.0.0", "2.1.0rc1")
+                .map(v -> com.orbit.backend.deps.version.Pep440.parse(v).orElseThrow()).toList();
+        java.util.function.Function<String, String> newer = req -> PythonSupport.newerVersion(installable,
+                req == null ? null : com.orbit.backend.deps.version.Pep440.parse(req).orElseThrow()).map(Object::toString).orElse(null);
+        assertThat(newer.apply("1.15.0")).isEqualTo("1.17.1");   // newest 1.x above the pin
+        assertThat(newer.apply("1.17.1")).isEqualTo("2.0.0");    // no newer 1.x: newest overall (never a pre-release)
+        assertThat(newer.apply("2.0.0")).isNull();               // nothing newer that works
+        assertThat(newer.apply(null)).isEqualTo("2.0.0");        // unpinned: newest
+        assertThat(com.orbit.backend.deps.version.Pep440.specifier(">=1.2,<2").lowerBound().orElseThrow().toString()).isEqualTo("1.2");
+        assertThat(com.orbit.backend.deps.version.Pep440.specifier("<2").lowerBound()).isEmpty();
+    }
+
+    @Test
+    void pythonRequirementsRememberTheirFileAndLine() throws IOException {
+        write("svc/requirements.txt", "# deps\n-r base.txt\nflask==3.0.0\nnumpy==1.26.0 \\\n    --hash=sha256:abc\n");
+        write("svc/base.txt", "\nrequests>=2.31\n");
+        PythonSupport py = new PythonSupport();
+        ProjectFiles files = ProjectFiles.scan(project);
+        var unit = py.units(files).get(0);
+        var declared = py.declared(files, unit);
+        var flask = declared.stream().filter(d -> d.req().name().equals("flask")).findFirst().orElseThrow();
+        assertThat(flask.source()).isEqualTo("svc/requirements.txt");
+        assertThat(flask.line()).isEqualTo(2);
+        var requests = declared.stream().filter(d -> d.req().name().equals("requests")).findFirst().orElseThrow();
+        assertThat(requests.source()).isEqualTo("svc/base.txt");
+        assertThat(requests.line()).isEqualTo(1);
+        var numpy = declared.stream().filter(d -> d.req().name().equals("numpy")).findFirst().orElseThrow();
+        assertThat(numpy.line()).isEqualTo(-1); // continued + hash-checked: never rewritten
     }
 
     @Test

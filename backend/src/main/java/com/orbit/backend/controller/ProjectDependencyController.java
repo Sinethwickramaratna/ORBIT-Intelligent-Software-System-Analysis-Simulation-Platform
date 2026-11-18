@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -41,11 +42,29 @@ public class ProjectDependencyController {
         return dependencyService.check(principal.userId(), projectId);
     }
 
+    /** How far the running (or the last) Dependency Check is; the UI polls it while the check request is open. */
+    @GetMapping("/check/progress")
+    public DependencySetupProgress checkProgress(@PathVariable UUID projectId, @AuthenticationPrincipal AuthenticatedUser principal) {
+        return dependencyService.checkProgress(principal.userId(), projectId);
+    }
+
     /** Setup Dependencies (after the user confirmed): starts the downloads; 409 when a setup is already running. */
     @PostMapping("/setup")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public DependencySetupProgress setup(@PathVariable UUID projectId, @AuthenticationPrincipal AuthenticatedUser principal) {
-        return dependencyService.startSetup(principal.userId(), projectId);
+    public DependencySetupProgress setup(@PathVariable UUID projectId,
+                                         @RequestBody(required = false) SetupRequest request,
+                                         @AuthenticationPrincipal AuthenticatedUser principal) {
+        boolean update = request == null || request.updateManifests() == null || request.updateManifests();
+        boolean skipUnused = request == null || request.skipUnused() == null || request.skipUnused();
+        return dependencyService.startSetup(principal.userId(), projectId, update, skipUnused);
+    }
+
+    /**
+     * Options of Setup Dependencies. {@code updateManifests} (default true): when a pinned version cannot be installed,
+     * install a newer one that can and update the requirements file. {@code skipUnused} (default true): do not download
+     * declared dependencies the source code never uses.
+     */
+    public record SetupRequest(Boolean updateManifests, Boolean skipUnused) {
     }
 
     /** How far the setup is; the UI polls it until {@code state} is no longer RUNNING. */

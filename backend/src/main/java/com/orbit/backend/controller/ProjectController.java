@@ -2,8 +2,12 @@ package com.orbit.backend.controller;
 
 import com.orbit.backend.dto.request.CloneInspectRequest;
 import com.orbit.backend.dto.request.CloneProjectRequest;
+import com.orbit.backend.dto.request.CreateEntryRequest;
 import com.orbit.backend.dto.request.CreateFolderRequest;
 import com.orbit.backend.dto.request.CreateProjectRequest;
+import com.orbit.backend.dto.request.RenameEntryRequest;
+import com.orbit.backend.dto.request.SaveFileRequest;
+import com.orbit.backend.dto.response.FileContentResponse;
 import com.orbit.backend.dto.response.FolderBrowseResponse;
 import com.orbit.backend.service.FolderBrowseService;
 import com.orbit.backend.dto.response.ProjectConfigResponse;
@@ -25,6 +29,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -106,6 +111,44 @@ public class ProjectController {
                                     @RequestParam(name = "path", required = false, defaultValue = "") String path,
                                     @AuthenticationPrincipal AuthenticatedUser principal) {
         return projectService.tree(principal.userId(), projectId, path);
+    }
+
+    /** Opens a text file for the editor ({@code path} relative to the project root). */
+    @GetMapping("/{projectId}/file")
+    public FileContentResponse readFile(@PathVariable UUID projectId,
+                                        @RequestParam(name = "path") String path,
+                                        @AuthenticationPrincipal AuthenticatedUser principal) {
+        return projectService.readFile(principal.userId(), projectId, path);
+    }
+
+    /** Saves an edited text file (Ctrl+S in the editor). */
+    @PutMapping("/{projectId}/file")
+    public FileContentResponse saveFile(@PathVariable UUID projectId, @Valid @RequestBody SaveFileRequest request,
+                                        @AuthenticationPrincipal AuthenticatedUser principal) {
+        return projectService.saveFile(principal.userId(), projectId, request);
+    }
+
+    /** New File / New Folder in the Explorer. */
+    @PostMapping("/{projectId}/files")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ProjectTreeResponse.Entry createEntry(@PathVariable UUID projectId, @Valid @RequestBody CreateEntryRequest request,
+                                                 @AuthenticationPrincipal AuthenticatedUser principal) {
+        return projectService.createEntry(principal.userId(), projectId, request);
+    }
+
+    /** Rename in the Explorer (the entry stays in its folder). */
+    @PostMapping("/{projectId}/files/rename")
+    public ProjectTreeResponse.Entry renameEntry(@PathVariable UUID projectId, @Valid @RequestBody RenameEntryRequest request,
+                                                 @AuthenticationPrincipal AuthenticatedUser principal) {
+        return projectService.renameEntry(principal.userId(), projectId, request);
+    }
+
+    /** Delete in the Explorer: removes the file, or the folder with everything in it, from disk. */
+    @DeleteMapping("/{projectId}/files")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteEntry(@PathVariable UUID projectId, @RequestParam(name = "path") String path,
+                            @AuthenticationPrincipal AuthenticatedUser principal) {
+        projectService.deleteEntry(principal.userId(), projectId, path);
     }
 
     /** The Scan button: reads the project folder again (it may have changed) and stores a new scan. */

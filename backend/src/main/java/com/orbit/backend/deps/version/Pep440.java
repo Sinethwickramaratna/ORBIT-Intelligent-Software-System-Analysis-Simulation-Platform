@@ -201,6 +201,24 @@ public final class Pep440 {
             return new Specifier(all, t);
         }
 
+        /**
+         * The version the specifier starts from: the highest version named by {@code ==}, {@code ===}, {@code ~=},
+         * {@code >=} or {@code >} (ignoring wildcards); empty when it has no lower bound ({@code <2}, empty set).
+         */
+        public Optional<Version> lowerBound() {
+            Version best = null;
+            for (Clause c : clauses) {
+                boolean bound = switch (c.op()) {
+                    case "==", "===", "~=", ">=", ">" -> true;
+                    default -> false;
+                };
+                if (bound && c.parsed() != null && (best == null || c.parsed().compareTo(best) > 0)) {
+                    best = c.parsed();
+                }
+            }
+            return Optional.ofNullable(best);
+        }
+
         /** The highest version that matches; pre-releases only when nothing else does. */
         public Optional<String> best(Collection<String> versions) {
             String best = null;

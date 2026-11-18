@@ -98,6 +98,39 @@ class DependencySetupNetworkTest {
     }
 
     @Test
+    void pythonPinnedVersionsWithoutWheelsAreReplacedByNewerOnesAndTheFileIsUpdated() throws IOException {
+        // On Windows / Python 3.12: PyYAML 5.x and cffi 1.15.0 have no wheels; cffi 1.x has newer ones, PyYAML only 6.x
+        String original = "six==1.16.0\r\npyyaml==5.3.1   # config files\r\ncffi==1.15.0 ; sys_platform == \"win32\"\r\n";
+        write("legacy/requirements.txt", original);
+        assertThat(engine.check(project).status()).isEqualTo(DependencyReport.Status.MISSING);
+
+        DependencyEngine.SetupResult r = engine.setup(project, SetupProgress.NONE, true);
+        assertThat(r.failures()).isEmpty();
+        assertThat(r.after().status()).as(String.valueOf(r.after())).isEqualTo(DependencyReport.Status.INSTALLED);
+        assertThat(r.changes()).extracting(InstallContext.ManifestChange::dependency).containsExactlyInAnyOrder("pyyaml", "cffi");
+
+        String updated = Files.readString(project.resolve("legacy/requirements.txt"));
+        String[] lines = updated.split("\r\n", -1);
+        assertThat(lines[0]).isEqualTo("six==1.16.0");                                    // installable: untouched
+        assertThat(lines[1]).matches("pyyaml==6\\.\\d+(\\.\\d+)?  # config files \\(updated by ORBIT: was ==5\\.3\\.1 - .*\\)");
+        assertThat(lines[2]).matches("cffi==1\\.\\d+\\.\\d+ ; sys_platform == \"win32\"  # updated by ORBIT: was ==1\\.15\\.0 - .*");
+        assertThat(lines[2]).doesNotStartWith("cffi==1.15.0");                            // same major (1.x) preferred
+        assertThat(project.resolve("legacy/requirements.txt" + PythonSupport.BACKUP_SUFFIX)).hasContent(original);
+        assertThat(engine.check(project).status()).isEqualTo(DependencyReport.Status.INSTALLED);
+    }
+
+    @Test
+    void pythonPinnedVersionsAreLeftAloneWhenUpdatesAreNotAllowed() throws IOException {
+        String original = "pyyaml==5.3.1\n";
+        write("strict/requirements.txt", original);
+        DependencyEngine.SetupResult r = engine.setup(project, SetupProgress.NONE, false);
+        assertThat(r.failures()).singleElement().asString().contains("version 6.").contains("works");
+        assertThat(r.after().status()).isEqualTo(DependencyReport.Status.MISSING);
+        assertThat(project.resolve("strict/requirements.txt")).hasContent(original);
+        assertThat(project.resolve("strict/requirements.txt" + PythonSupport.BACKUP_SUFFIX)).doesNotExist();
+    }
+
+    @Test
     void pythonPyprojectWithPoetryConstraints() throws IOException {
         write("tool/pyproject.toml", """
                 [tool.poetry]
@@ -220,5 +253,96 @@ class DependencySetupNetworkTest {
             assertThat(s.map(p -> p.getFileName().toString())).anyMatch(n -> n.startsWith("path-1."))
                     .anyMatch(n -> n.startsWith("collection-1."));
         }
+    }
+
+    // ------------------------------------------------------------------------------------------ unused, venv, cancel
+
+    @Test
+    void pythonGetsARealVirtualEnvironmentAndUnusedRequirementsAreNotDownloaded() throws IOException {
+        write("requirements.txt", "requests==2.32.3\npandas==2.2.3\n");
+        write("main.py", "import requests\nprint(requests.get)\n");
+        // the computer ORBIT runs on: with Python installed here the venv is made by `python -m venv`
+        DependencyEngine here = new DependencyEngine(DependencySettings.defaults().withUserHome(null), TargetPlatform.current());
+        DependencyReport before = here.check(project);
+        assertThat(before.units().get(0).items()).anyMatch(i -> i.name().equals("pandas") && i.state() == DependencyState.UNUSED);
+        DependencyEngine.SetupResult r = here.setup(project, SetupProgress.NONE, true, true);
+        assertThat(r.failures()).isEmpty();
+        assertThat(r.after().status()).isEqualTo(DependencyReport.Status.INSTALLED);
+        Path venv = project.resolve(".venv");
+        assertThat(venv.resolve("pyvenv.cfg")).isRegularFile();
+        Path site = PythonSupport.sitePackagesOf(venv).orElseThrow();
+        assertThat(site.resolve("requests")).isDirectory();
+        assertThat(site.resolve("urllib3")).isDirectory(); // what requests needs
+        assertThat(site.resolve("pandas")).doesNotExist();
+        assertThat(site.resolve("numpy")).doesNotExist();
+        assertThat(PythonSupport.venvInterpreter(venv)).as("a real venv with its own interpreter").isPresent();
+    }
+
+    @Test
+    void cancelStopsARealSetupWithinSeconds() throws Exception {
+        // ORBIT's own frontend lockfile: a few hundred packages, enough to still be downloading when Cancel is pressed
+        Path repo = Path.of(System.getProperty("orbit.repo", "..")).toAbsolutePath().normalize();
+        Files.copy(repo.resolve("frontend/package.json"), project.resolve("package.json"));
+        Files.copy(repo.resolve("frontend/package-lock.json"), project.resolve("package-lock.json"));
+        java.util.concurrent.atomic.AtomicInteger installed = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.List<Runnable> hooks = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        SetupProgress progress = new SetupProgress() {
+            @Override
+            public void unit(String title, int index, int total) {
+            }
+
+            @Override
+            public void step(String text, int done, int total) {
+            }
+
+            @Override
+            public void item(String what, boolean ok) {
+                if (ok) {
+                    installed.incrementAndGet();
+                }
+            }
+
+            @Override
+            public void log(String line) {
+            }
+
+            @Override
+            public boolean cancelled() {
+                return cancelled.get();
+            }
+
+            @Override
+            public void onCancel(Runnable action) {
+                hooks.add(action);
+            }
+        };
+        java.util.concurrent.CompletableFuture<Throwable> run = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                engine.setup(project, progress, true, true);
+                return null;
+            } catch (Throwable t) {
+                return t;
+            }
+        });
+        long deadline = System.currentTimeMillis() + 120_000;
+        while (installed.get() < 25 && !run.isDone() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertThat(run).as("still downloading").isNotDone();
+        long t0 = System.nanoTime();
+        cancelled.set(true);
+        hooks.forEach(Runnable::run);
+        long cancelMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+        Throwable t = run.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        long stopMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+        int atStop = installed.get();
+        Thread.sleep(3000);
+        System.out.println("cancel after " + atStop + " packages: cancel() took " + cancelMs + " ms, setup ended after " + stopMs
+                + " ms, packages installed afterwards: " + (installed.get() - atStop));
+        assertThat(cancelMs).isLessThan(500);
+        assertThat(stopMs).isLessThan(3000);
+        assertThat(t).isInstanceOf(IOException.class).hasMessageContaining("cancelled");
+        assertThat(installed.get() - atStop).as("nothing is installed after Cancel").isLessThanOrEqualTo(2);
     }
 }

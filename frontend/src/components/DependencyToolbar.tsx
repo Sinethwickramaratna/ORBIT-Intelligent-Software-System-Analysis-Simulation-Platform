@@ -73,14 +73,25 @@ export default function DependencyToolbar({ dep }: { dep: Dependencies }) {
         <span>{dep.checking ? "Checking…" : "Dependency Check"}</span>
       </button>
       <DependencyStatusIcon dep={dep} />
+      {dep.checking && dep.checkProgress && (
+        <span className="dep-running" role="status" title={dep.checkProgress.phase ?? undefined}>
+          <span className="dep-running-bar" aria-hidden="true">
+            <span style={{ width: `${dep.checkProgress.percent}%` }} />
+          </span>
+          {dep.checkProgress.unitCount > 0
+            ? `${Math.min(dep.checkProgress.unitIndex + 1, dep.checkProgress.unitCount)}/${dep.checkProgress.unitCount} · ${dep.checkProgress.percent}%`
+            : "Reading project…"}
+        </span>
+      )}
       {showSetup &&
         (dep.installing ? (
-          <span className="dep-running" role="status" title={dep.setup?.phase ?? undefined}>
+          <button type="button" className="dep-running as-button" onClick={dep.openProgress}
+            title={`${dep.setup?.phase ?? ""}${dep.setup?.current ? "\n" + dep.setup.current : ""}\nClick to see the progress`}>
             <span className="dep-running-bar" aria-hidden="true">
               <span style={{ width: `${dep.setup?.percent ?? 0}%` }} />
             </span>
-            Setting up… {dep.setup?.percent ?? 0}%
-          </span>
+            Setting up… {dep.setup?.percent ?? 0}% · {dep.setup?.installed ?? 0} installed
+          </button>
         ) : (
           <button type="button" className="dep-btn primary" onClick={dep.askSetup} disabled={busy}>
             <DownloadIcon />

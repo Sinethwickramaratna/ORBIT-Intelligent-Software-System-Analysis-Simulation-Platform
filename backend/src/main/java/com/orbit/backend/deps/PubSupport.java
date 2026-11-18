@@ -14,6 +14,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -162,8 +165,17 @@ public final class PubSupport implements EcosystemSupport {
     public DependencyReport.Unit check(ProjectFiles files, UnitSpec unit, InstallContext ctx) {
         Map<String, Object> pubspec = yaml(files.read(unit.manifests().get(0)));
         Map<String, List<String>> available = available(files, unit.key(), ctx);
+        CodeUsage usage = ctx.usage(files.root());
         List<Item> items = new ArrayList<>();
+        int unused = 0;
         for (Dep d : deps(pubspec)) {
+            if ((d.kind() == Kind.HOSTED || d.kind() == Kind.GIT) && !available.containsKey(d.name())
+                    && !usage.dartUsed(unit.key(), d.name())) {
+                items.add(new Item(d.name(), d.constraint(), null, d.scope(), DependencyState.UNUSED,
+                        "not imported anywhere in the code - not downloaded"));
+                unused++;
+                continue;
+            }
             switch (d.kind()) {
                 case SDK -> items.add(new Item(d.name(), "sdk", null, d.scope(), DependencyState.SDK, "comes with the Flutter / Dart SDK"));
                 case PATH -> items.add(new Item(d.name(), "path", null, d.scope(), DependencyState.LOCAL, "local path"));
@@ -186,7 +198,9 @@ public final class PubSupport implements EcosystemSupport {
                 }
             }
         }
-        return DependencyReport.Unit.of(Ecosystem.PUB, unit.manifests().get(0), CACHE, null, items, false);
+        String message = unused == 0 ? null
+                : unused + (unused == 1 ? " dependency is" : " dependencies are") + " not used by the code and not downloaded";
+        return DependencyReport.Unit.of(Ecosystem.PUB, unit.manifests().get(0), CACHE, message, items, false);
     }
 
     // ------------------------------------------------------------------------------------------ install
@@ -200,8 +214,19 @@ public final class PubSupport implements EcosystemSupport {
         Path cache = files.root().resolve(CACHE).resolve(HOSTED);
         Files.createDirectories(cache);
         Map<String, Object> pubspec = yaml(files.read(unit.manifests().get(0)));
+        CodeUsage usage = ctx.skipUnused() ? ctx.usage(files.root()) : CodeUsage.everything();
+        Set<String> unused = new TreeSet<>();
+        Set<String> used = new TreeSet<>();
         for (Dep d : deps(pubspec)) {
-            if (d.kind() == Kind.GIT && !available(files, unit.key(), ctx).containsKey(d.name())) {
+            if (d.kind() == Kind.HOSTED || d.kind() == Kind.GIT) {
+                (usage.dartUsed(unit.key(), d.name()) ? used : unused).add(d.name());
+            }
+        }
+        if (!unused.isEmpty()) {
+            ctx.progress().log("Not used by the code, not downloaded (" + unused.size() + "): " + String.join(", ", unused));
+        }
+        for (Dep d : deps(pubspec)) {
+            if (d.kind() == Kind.GIT && !unused.contains(d.name()) && !available(files, unit.key(), ctx).containsKey(d.name())) {
                 ctx.fail(d.name() + ": git dependency - run dart pub get / flutter pub get");
             }
         }
@@ -212,12 +237,25 @@ public final class PubSupport implements EcosystemSupport {
         Map<String, Object> lock = yaml(files.read(ProjectFiles.join(unit.key(), "pubspec.lock")));
         if (lock.get("packages") instanceof Map<?, ?> locked && !locked.isEmpty()) {
             ctx.progress().log("Installing the versions pinned in pubspec.lock");
+            Map<String, String> hosted = new LinkedHashMap<>();
             for (var e : locked.entrySet()) {
-                if (!(e.getValue() instanceof Map<?, ?> p) || !"hosted".equals(String.valueOf(p.get("source")))) {
+                if (e.getValue() instanceof Map<?, ?> p && "hosted".equals(String.valueOf(p.get("source")))) {
+                    hosted.put(String.valueOf(e.getKey()), String.valueOf(p.get("version")));
+                }
+            }
+            // leave out what only the unused dependencies need (packages the SDK needs are kept)
+            Set<String> drop = new HashSet<>();
+            if (!unused.isEmpty()) {
+                ctx.progress().step("Working out what only the unused dependencies need", 0, 0);
+                drop.addAll(closure(unused, hosted, api, meta, ctx));
+                drop.removeAll(closure(used, hosted, api, meta, ctx));
+            }
+            for (var e : hosted.entrySet()) {
+                String name = e.getKey();
+                String version = e.getValue();
+                if (drop.contains(name)) {
                     continue;
                 }
-                String name = String.valueOf(e.getKey());
-                String version = String.valueOf(p.get("version"));
                 try {
                     Pick pick = exact(api, name, version, meta, ctx);
                     if (pick != null) {
@@ -230,7 +268,7 @@ public final class PubSupport implements EcosystemSupport {
                 }
             }
         } else {
-            resolve(pubspec, api, meta, picks, ctx);
+            resolve(pubspec, api, meta, picks, ctx, unused);
         }
 
         List<Pick> todo = picks.values().stream()
@@ -248,12 +286,13 @@ public final class PubSupport implements EcosystemSupport {
                     Downloader.verifySha256(tgz, p.sha256(), p.name() + " " + p.version());
                     Archives.deleteTree(dest);
                     Archives.untarGz(tgz, dest, n -> n.startsWith("./") ? n.substring(2) : n);
+                    ctx.installed(p.name() + " " + p.version(), done.incrementAndGet(), todo.size());
                 } catch (IOException e) {
                     ctx.fail(p.name() + " " + p.version() + ": " + e.getMessage());
+                    ctx.progress().step(p.name() + " " + p.version(), done.incrementAndGet(), todo.size());
                 } finally {
                     Files.deleteIfExists(tgz);
                 }
-                ctx.progress().step(p.name() + " " + p.version(), done.incrementAndGet(), todo.size());
                 return null;
             });
         }
@@ -280,13 +319,48 @@ public final class PubSupport implements EcosystemSupport {
     }
 
     /** Newest version satisfying every constraint seen so far for each package (SDK packages are left to the SDK). */
+    /** The locked packages reachable from {@code roots} (themselves included), following each locked version's pubspec. */
+    private static Set<String> closure(Set<String> roots, Map<String, String> locked, String api, Map<String, JsonNode> meta,
+                                       InstallContext ctx) throws IOException {
+        Set<String> seen = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        for (String r : roots) {
+            if (locked.containsKey(r) && seen.add(r)) {
+                queue.add(r);
+            }
+        }
+        while (!queue.isEmpty()) {
+            ctx.checkCancelled();
+            String name = queue.poll();
+            JsonNode m;
+            try {
+                m = metadata(api, name, meta, ctx);
+            } catch (Downloader.CancelledException e) {
+                throw e;
+            } catch (IOException e) {
+                continue;
+            }
+            for (JsonNode v : m.path("versions")) {
+                if (locked.get(name).equals(InstallContext.text(v, "version"))) {
+                    for (var d : v.path("pubspec").path("dependencies").properties()) {
+                        if (locked.containsKey(d.getKey()) && seen.add(d.getKey())) {
+                            queue.add(d.getKey());
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        return seen;
+    }
+
     private static void resolve(Map<String, Object> pubspec, String api, Map<String, JsonNode> meta, Map<String, Pick> picks,
-                                InstallContext ctx) throws IOException {
+                                InstallContext ctx, Set<String> unused) throws IOException {
         record Want(String name, String constraint) {
         }
         Deque<Want> queue = new ArrayDeque<>();
         for (Dep d : deps(pubspec)) {
-            if (d.kind() == Kind.HOSTED) {
+            if (d.kind() == Kind.HOSTED && !unused.contains(d.name())) {
                 queue.add(new Want(d.name(), d.constraint()));
             }
         }

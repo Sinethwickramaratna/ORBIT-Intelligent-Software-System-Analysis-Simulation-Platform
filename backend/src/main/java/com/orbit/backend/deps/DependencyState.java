@@ -13,7 +13,12 @@ public enum DependencyState {
     /** Comes with an SDK (for example {@code flutter: sdk: flutter}): installed with the SDK, not downloaded. */
     SDK(false),
     /** Missing, and declared in a way ORBIT cannot download (git URL, private file, ...). */
-    UNSUPPORTED(true);
+    UNSUPPORTED(true),
+    /**
+     * Declared, but the source code never uses it (no import, no command, no config mentions it): not downloaded,
+     * because reconstructing the architecture does not need it.
+     */
+    UNUSED(false);
 
     private final boolean needsSetup;
 

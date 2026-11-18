@@ -35,12 +35,88 @@ public final class InstallContext implements AutoCloseable {
     private final List<String> failures = Collections.synchronizedList(new ArrayList<>());
     private final Set<String> done = Collections.synchronizedSet(new HashSet<>());
     private ExecutorService pool;
+    private volatile boolean updateManifests;
+    private final List<ManifestChange> changes = Collections.synchronizedList(new ArrayList<>());
+
+    /** A dependency version ORBIT changed in a manifest of the project. */
+    public record ManifestChange(String file, String dependency, String from, String to, String reason) {
+    }
 
     public InstallContext(DependencySettings settings, TargetPlatform platform, SetupProgress progress) {
         this.settings = settings;
         this.platform = platform;
-        this.downloader = new Downloader(settings.maxDownloadBytes());
         this.progress = progress == null ? SetupProgress.NONE : progress;
+        this.downloader = new Downloader(settings.maxDownloadBytes(), this.progress::cancelled);
+        // Cancel takes effect at once: open connections are closed and the download threads are stopped
+        this.progress.onCancel(this::abort);
+    }
+
+    private void abort() {
+        downloader.abortAll();
+        Runnable[] hooks;
+        synchronized (cancelHooks) {
+            hooks = cancelHooks.toArray(Runnable[]::new);
+        }
+        for (Runnable r : hooks) {
+            try {
+                r.run();
+            } catch (RuntimeException ignored) {
+                // best effort
+            }
+        }
+        synchronized (this) {
+            if (pool != null) {
+                pool.shutdownNow();
+            }
+        }
+    }
+
+    private final List<Runnable> cancelHooks = new ArrayList<>();
+
+    /** Runs {@code action} when the user cancels (e.g. stop a child process); removed with the returned handle. */
+    public AutoCloseable onCancel(Runnable action) {
+        synchronized (cancelHooks) {
+            cancelHooks.add(action);
+        }
+        if (progress.cancelled()) {
+            action.run();
+        }
+        return () -> {
+            synchronized (cancelHooks) {
+                cancelHooks.remove(action);
+            }
+        };
+    }
+
+    public boolean cancelled() {
+        return progress.cancelled();
+    }
+
+    /** Code usage of the project (imports and config mentions), scanned once per run. */
+    private volatile CodeUsage usage;
+
+    public CodeUsage usage(Path projectRoot) {
+        CodeUsage u = usage;
+        if (u == null) {
+            synchronized (this) {
+                if (usage == null) {
+                    usage = CodeUsage.scan(projectRoot);
+                }
+                u = usage;
+            }
+        }
+        return u;
+    }
+
+    private volatile boolean skipUnused = true;
+
+    /** Whether setup leaves out declared dependencies the code does not use (default true). */
+    public boolean skipUnused() {
+        return skipUnused;
+    }
+
+    public void setSkipUnused(boolean skip) {
+        this.skipUnused = skip;
     }
 
     public DependencySettings settings() {
@@ -61,8 +137,44 @@ public final class InstallContext implements AutoCloseable {
 
     /** Records a package that could not be set up (the setup goes on with the others). */
     public void fail(String message) {
+        if (progress.cancelled()) {
+            return; // what was cut off by Cancel is not a failure
+        }
         failures.add(message);
+        progress.item(message, false);
         progress.log("FAILED: " + message);
+    }
+
+    /** A package was downloaded and saved: moves the bar and writes the activity log. */
+    public void installed(String what, int done, int total) {
+        progress.item(what, true);
+        progress.log("Installed " + what);
+        progress.step(what, done, total);
+    }
+
+    /** Whether setup may change a version in the project's requirements files when the requested one cannot be installed. */
+    public boolean updateManifests() {
+        return updateManifests;
+    }
+
+    public void setUpdateManifests(boolean allowed) {
+        this.updateManifests = allowed;
+    }
+
+    public void manifestChanged(String file, String dependency, String from, String to, String reason) {
+        changes.add(new ManifestChange(file, dependency, from, to, reason));
+        progress.manifestChanged(file, dependency, from, to, reason);
+        progress.log("Updated " + file + ": " + dependency + " " + (from == null || from.isBlank() ? "(unpinned)" : from) + " -> " + to);
+    }
+
+    public List<ManifestChange> changes() {
+        synchronized (changes) {
+            return List.copyOf(changes);
+        }
+    }
+
+    public int failureCount() {
+        return failures.size();
     }
 
     public List<String> failures() {
@@ -96,14 +208,32 @@ public final class InstallContext implements AutoCloseable {
                 });
             }
         }
+        checkCancelled();
         List<Future<Void>> futures = new ArrayList<>();
-        for (var t : tasks) {
-            futures.add(pool.submit(t));
+        try {
+            for (var t : tasks) {
+                futures.add(pool.submit(t));
+            }
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            throw new IOException("Setup cancelled"); // the pool was stopped by Cancel
         }
         IOException first = null;
         for (Future<Void> f : futures) {
             try {
-                f.get();
+                // waits in slices: tasks that never started (the pool was stopped by Cancel) would block a plain get()
+                while (true) {
+                    try {
+                        f.get(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+                        break;
+                    } catch (java.util.concurrent.TimeoutException timeout) {
+                        if (progress.cancelled()) {
+                            futures.forEach(x -> x.cancel(true));
+                            throw new IOException("Setup cancelled");
+                        }
+                    }
+                }
+            } catch (java.util.concurrent.CancellationException e) {
+                throw new IOException("Setup cancelled");
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 futures.forEach(x -> x.cancel(true));
@@ -114,6 +244,7 @@ public final class InstallContext implements AutoCloseable {
                 }
             }
         }
+        checkCancelled();
         if (first != null) {
             throw first;
         }

@@ -26,6 +26,7 @@ import org.eclipse.aether.resolution.DependencyResolutionException;
 import org.eclipse.aether.resolution.DependencyResult;
 import org.eclipse.aether.supplier.RepositorySystemSupplier;
 import org.eclipse.aether.transfer.AbstractTransferListener;
+import org.eclipse.aether.transfer.TransferCancelledException;
 import org.eclipse.aether.transfer.TransferEvent;
 
 import java.io.File;
@@ -331,6 +332,27 @@ public final class JvmSupport implements EcosystemSupport {
         }
     }
 
+    /** Gradle's conflict rule: the highest requested version wins (the nearest one when versions are equal). */
+    static final class HighestVersionSelector extends org.eclipse.aether.util.graph.transformer.ConflictResolver.VersionSelector {
+        @Override
+        public void selectVersion(org.eclipse.aether.util.graph.transformer.ConflictResolver.ConflictContext context) {
+            org.eclipse.aether.util.graph.transformer.ConflictResolver.ConflictItem winner = null;
+            for (var item : context.getItems()) {
+                if (winner == null) {
+                    winner = item;
+                    continue;
+                }
+                var v = item.getNode().getVersion();
+                var w = winner.getNode().getVersion();
+                int c = v == null || w == null ? 0 : v.compareTo(w);
+                if (c > 0 || (c == 0 && item.getDepth() < winner.getDepth())) {
+                    winner = item;
+                }
+            }
+            context.setWinner(winner);
+        }
+    }
+
     private record Resolver(RepositorySystem system, DefaultRepositorySystemSession session) {
     }
 
@@ -348,13 +370,51 @@ public final class JvmSupport implements EcosystemSupport {
         session.setIgnoreArtifactDescriptorRepositories(false);
         session.setConfigProperty("aether.connector.userAgent", "ORBIT-dependency-setup/1.0");
         session.setConfigProperty("aether.connector.basic.threads", Math.max(2, ctx.settings().parallelDownloads()));
+        // a stalled repository fails instead of hanging (the defaults are 10 s connect, 30 min per request)
+        session.setConfigProperty("aether.connector.connectTimeout", 20_000);
+        session.setConfigProperty("aether.connector.requestTimeout", 60_000);
+        AtomicInteger started = new AtomicInteger();
+        AtomicInteger finished = new AtomicInteger();
         session.setTransferListener(new AbstractTransferListener() {
             @Override
-            public void transferSucceeded(TransferEvent event) {
-                int n = downloads.incrementAndGet();
+            public void transferInitiated(TransferEvent event) throws TransferCancelledException {
+                stopIfCancelled();
+                started.incrementAndGet();
                 String name = event.getResource().getResourceName();
+                ctx.progress().step("Downloading " + name.substring(name.lastIndexOf('/') + 1), finished.get(), started.get());
+            }
+
+            @Override
+            public void transferStarted(TransferEvent event) throws TransferCancelledException {
+                stopIfCancelled();
+            }
+
+            @Override
+            public void transferProgressed(TransferEvent event) throws TransferCancelledException {
+                stopIfCancelled(); // aborts a jar that is half downloaded
+            }
+
+            private void stopIfCancelled() throws TransferCancelledException {
+                if (ctx.cancelled()) {
+                    throw new TransferCancelledException("Setup cancelled");
+                }
+            }
+
+            @Override
+            public void transferFailed(TransferEvent event) {
+                finished.incrementAndGet(); // e.g. a file looked for in a repository that does not have it
+            }
+
+            @Override
+            public void transferSucceeded(TransferEvent event) {
+                downloads.incrementAndGet();
+                int n = finished.incrementAndGet();
+                String name = event.getResource().getResourceName();
+                String file = name.substring(name.lastIndexOf('/') + 1);
                 if (name.endsWith(".jar") || name.endsWith(".aar")) {
-                    ctx.progress().step(name.substring(name.lastIndexOf('/') + 1), n, Math.max(n, 1));
+                    ctx.installed(file, n, started.get());
+                } else {
+                    ctx.progress().step(file, n, started.get());
                 }
             }
         });
@@ -432,6 +492,13 @@ public final class JvmSupport implements EcosystemSupport {
             ctx.fail(ref + ": not found in gradle/libs.versions.toml");
         }
         Resolver r = resolver(local, null, ctx, downloads);
+        // Gradle settles a version conflict with the highest version; Maven's "nearest wins" may give up instead
+        r.session().setDependencyGraphTransformer(new org.eclipse.aether.util.graph.transformer.ChainedDependencyGraphTransformer(
+                new org.eclipse.aether.util.graph.transformer.ConflictResolver(new HighestVersionSelector(),
+                        new org.eclipse.aether.util.graph.transformer.JavaScopeSelector(),
+                        new org.eclipse.aether.util.graph.transformer.SimpleOptionalitySelector(),
+                        new org.eclipse.aether.util.graph.transformer.JavaScopeDeriver()),
+                new org.eclipse.aether.util.graph.transformer.JavaDependencyContextRefiner()));
         List<RemoteRepository> repos = remotes(ctx, build.repositories());
         List<Coordinate> boms = new ArrayList<>(build.platforms());
         if (build.springBootVersion() != null) {
@@ -473,7 +540,35 @@ public final class JvmSupport implements EcosystemSupport {
         }
         Set<String> ownGa = new LinkedHashSet<>();
         own.forEach(n -> ownGa.add("*:" + n));
-        resolve(r, null, deps, new ArrayList<>(managed.values()), repos, ownGa, ctx);
+        // Gradle fetches transitive Android libraries as .aar (or via their module metadata) even when a POM lists them
+        // as plain dependencies; failed jars are looked at again the same way, a few rounds deep.
+        Set<String> retried = new LinkedHashSet<>();
+        Set<String> seen = new LinkedHashSet<>();
+        List<Dependency> round = deps;
+        for (int pass = 0; pass < 5 && !round.isEmpty(); pass++) {
+            List<Artifact> failed = resolve(r, null, round, new ArrayList<>(managed.values()), repos, ownGa, ctx, true);
+            List<Dependency> next = new ArrayList<>();
+            List<Artifact> unfixable = new ArrayList<>();
+            for (Artifact a : failed) {
+                String key = a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getVersion();
+                if ("jar".equals(a.getExtension()) && a.getClassifier().isEmpty() && retried.add(key)) {
+                    int before = next.size();
+                    addGradleDependency(r, repos, local, new Coordinate(a.getGroupId(), a.getArtifactId(), a.getVersion(),
+                            "compile", "jar", null), next, seen, ctx);
+                    // still a plain jar: nothing else to try
+                    if (next.size() > before && "jar".equals(next.get(next.size() - 1).getArtifact().getExtension())) {
+                        next.remove(next.size() - 1);
+                        unfixable.add(a);
+                    }
+                } else {
+                    unfixable.add(a);
+                }
+            }
+            for (Artifact a : unfixable) {
+                ctx.fail(a + ": not found");
+            }
+            round = next;
+        }
     }
 
     /** What the POM of a Gradle dependency says: its packaging, and whether the real files are in Gradle Module Metadata. */
@@ -619,7 +714,18 @@ public final class JvmSupport implements EcosystemSupport {
 
     private static void resolve(Resolver r, Artifact root, List<Dependency> deps, List<Dependency> managed,
                                 List<RemoteRepository> repos, Set<String> ownGa, InstallContext ctx) throws IOException {
+        for (Artifact a : resolve(r, root, deps, managed, repos, ownGa, ctx, false)) {
+            ctx.fail(a + ": not found");
+        }
+    }
+
+    /** Resolves and downloads; returns the artifacts that could not be downloaded (reported at once unless {@code collectFailures}). */
+    private static List<Artifact> resolve(Resolver r, Artifact root, List<Dependency> deps, List<Dependency> managed,
+                                          List<RemoteRepository> repos, Set<String> ownGa, InstallContext ctx,
+                                          boolean collectFailures) throws IOException {
+        List<Artifact> failed = new ArrayList<>();
         ctx.checkCancelled();
+        ctx.progress().step("Resolving the dependency tree (parents, BOMs, transitive dependencies)", 0, 0);
         CollectRequest collect = new CollectRequest();
         if (root != null) {
             collect.setRootArtifact(root);
@@ -639,6 +745,7 @@ public final class JvmSupport implements EcosystemSupport {
         try {
             result = r.system().resolveDependencies(r.session(), request);
         } catch (DependencyResolutionException e) {
+            ctx.checkCancelled(); // transfers aborted by Cancel are not failures
             result = e.getResult();
             if (result == null) {
                 throw new IOException(rootMessage(e));
@@ -649,16 +756,20 @@ public final class JvmSupport implements EcosystemSupport {
                 }
             }
         }
+        ctx.checkCancelled();
         int ok = 0;
         for (ArtifactResult ar : result.getArtifactResults()) {
             if (ar.isResolved()) {
                 ok++;
+            } else if (collectFailures) {
+                failed.add(ar.getRequest().getArtifact());
             } else {
                 String what = ar.getRequest().getArtifact().toString();
                 ctx.fail(what + ": " + (ar.getExceptions().isEmpty() ? "not found" : rootMessage(ar.getExceptions().get(0))));
             }
         }
         ctx.progress().log(ok + " artifacts resolved");
+        return failed;
     }
 
     private static String rootMessage(Throwable e) {

@@ -12,6 +12,7 @@ import DeleteProjectDialog from "./DeleteProjectDialog";
 import FileTree from "./FileTree";
 import DependencyToolbar from "./DependencyToolbar";
 import DependencySetupDialog from "./DependencySetupDialog";
+import DependencyProgressDialog from "./DependencyProgressDialog";
 import ArchitecturePanel from "./ArchitecturePanel";
 import { useDependencies } from "@/lib/useDependencies";
 
@@ -417,6 +418,14 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
           check={dependencies.check}
           onCancel={dependencies.closeConfirm}
           onConfirm={dependencies.confirmSetup}
+        />
+      )}
+      {active && dependencies.progressOpen && dependencies.setup && dependencies.setup.state !== "IDLE" && (
+        <DependencyProgressDialog
+          projectName={active.projectName}
+          progress={dependencies.setup}
+          onClose={dependencies.closeProgress}
+          onCancel={dependencies.cancelSetup}
         />
       )}
 

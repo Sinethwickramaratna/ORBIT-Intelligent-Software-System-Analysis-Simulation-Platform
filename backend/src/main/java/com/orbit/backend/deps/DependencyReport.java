@@ -52,8 +52,14 @@ public record DependencyReport(Status status, List<Unit> units) {
                 List.copyOf(units));
     }
 
+    /** Dependencies the project needs (declared ones the code does not use are not counted). */
     public long totalCount() {
-        return units.stream().mapToLong(u -> u.items().size()).sum();
+        return units.stream().flatMap(u -> u.items().stream()).filter(i -> i.state() != DependencyState.UNUSED).count();
+    }
+
+    /** Declared dependencies the source code does not use (not downloaded). */
+    public long unusedCount() {
+        return units.stream().flatMap(u -> u.items().stream()).filter(i -> i.state() == DependencyState.UNUSED).count();
     }
 
     public long missingCount() {

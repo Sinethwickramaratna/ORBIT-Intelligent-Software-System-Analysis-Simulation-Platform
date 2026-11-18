@@ -42,6 +42,13 @@ public enum ErrorCode {
     PROJECT_CLONE_TARGET_EXISTS(HttpStatus.CONFLICT, "The clone folder already exists and is not empty"),
     DEPENDENCY_CHECK_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "The dependencies of the project could not be checked"),
     DEPENDENCY_SETUP_RUNNING(HttpStatus.CONFLICT, "Dependency setup is already running for this project"),
+    FILE_NOT_FOUND(HttpStatus.NOT_FOUND, "That file or folder does not exist in the project"),
+    FILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "A file or folder with that name already exists here"),
+    FILE_NAME_INVALID(HttpStatus.BAD_REQUEST, "That is not a valid file or folder name"),
+    FILE_NOT_TEXT(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "This file is not a UTF-8 text file and cannot be edited here"),
+    FILE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "This file is too large to edit here"),
+    FILE_CHANGED_ON_DISK(HttpStatus.CONFLICT, "The file was changed on disk after it was opened"),
+    FILE_OPERATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "The file operation failed"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error");
 
     private final HttpStatus status;

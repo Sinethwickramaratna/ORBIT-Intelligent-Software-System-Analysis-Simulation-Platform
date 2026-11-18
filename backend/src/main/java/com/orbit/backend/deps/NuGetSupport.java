@@ -293,9 +293,10 @@ public final class NuGetSupport implements EcosystemSupport {
                     continue;
                 }
                 version = NuGetVersion.parse(pick.get()).map(NuGetVersion.Version::normalized).orElse(pick.get().toLowerCase(Locale.ROOT));
-                ctx.progress().step(w.id() + " " + version, done.incrementAndGet(), done.get() + queue.size());
+                ctx.progress().step("Downloading " + w.id() + " " + version, done.get(), done.get() + queue.size() + 1);
                 try {
                     download(base, key, version, folder, ctx);
+                    ctx.installed(w.id() + " " + version, done.incrementAndGet(), done.get() + queue.size());
                 } catch (IOException e) {
                     ctx.fail(w.id() + " " + version + ": " + e.getMessage());
                     continue;

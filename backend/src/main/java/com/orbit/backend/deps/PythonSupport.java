@@ -69,8 +69,15 @@ public final class PythonSupport implements EcosystemSupport {
 
     // ------------------------------------------------------------------------------------------ declared requirements
 
-    /** A declared requirement and where it came from; {@code raw} is shown in the UI. */
-    record Declared(Requirement req, String raw, String scope, String unsupported) {
+    /**
+     * A declared requirement and where it came from; {@code raw} is shown in the UI. {@code source} / {@code line}
+     * (0-based physical line) say which requirements*.txt line declares it, so setup can update that line; null / -1
+     * when it cannot be edited safely (pyproject.toml, Pipfile, continued lines, hash-checked lines).
+     */
+    record Declared(Requirement req, String raw, String scope, String unsupported, String source, int line) {
+        Declared(Requirement req, String raw, String scope, String unsupported) {
+            this(req, raw, scope, unsupported, null, -1);
+        }
     }
 
     List<Declared> declared(ProjectFiles files, UnitSpec unit) {
@@ -115,9 +122,17 @@ public final class PythonSupport implements EcosystemSupport {
         if (text == null) {
             return;
         }
-        String joined = text.replace("\r", "").replaceAll("\\\\\n", " ");
-        for (String rawLine : joined.split("\n")) {
-            String line = rawLine.replaceAll("(^|\\s)#.*$", "").trim();
+        String[] physical = text.replace("\r", "").split("\n", -1);
+        for (int i = 0; i < physical.length; i++) {
+            int first = i;
+            StringBuilder joined = new StringBuilder(physical[i]);
+            while (joined.toString().endsWith("\\") && i + 1 < physical.length) {
+                joined.setLength(joined.length() - 1);
+                joined.append(' ').append(physical[++i]);
+            }
+            // only a requirement on one line of its own, without hashes, is rewritten by setup
+            boolean editable = first == i && !physical[first].contains("--hash");
+            String line = joined.toString().replaceAll("(^|\\s)#.*$", "").trim();
             if (line.isEmpty()) {
                 continue;
             }
@@ -140,8 +155,9 @@ public final class PythonSupport implements EcosystemSupport {
                 continue;
             }
             String l = line;
+            int lineNo = editable ? first : -1;
             Pep440.requirement(l).ifPresent(r -> out.add(new Declared(r, l, scope,
-                    r.url() != null ? "URL requirement: install it with pip" : null)));
+                    r.url() != null ? "URL requirement: install it with pip" : null, path, lineNo)));
         }
     }
 
@@ -328,6 +344,17 @@ public final class PythonSupport implements EcosystemSupport {
                     return new Venv(dir, site.get(), true, venvPython(dir).orElse(null));
                 }
             }
+            // a virtual environment with another name ("myenv", "python-env" ...): any folder with a pyvenv.cfg
+            Path here = files.root().resolve(cur.isEmpty() ? "." : cur).normalize();
+            try (Stream<Path> s = Files.list(here)) {
+                Optional<Path> other = s.filter(p -> Files.isRegularFile(p.resolve("pyvenv.cfg")))
+                        .filter(p -> sitePackagesOf(p).isPresent()).sorted().findFirst();
+                if (other.isPresent()) {
+                    return new Venv(other.get(), sitePackagesOf(other.get()).get(), true, venvPython(other.get()).orElse(null));
+                }
+            } catch (IOException ignored) {
+                // not listable
+            }
             if (cur.isEmpty()) {
                 break;
             }
@@ -377,6 +404,160 @@ public final class PythonSupport implements EcosystemSupport {
             // fall through
         }
         return Optional.empty();
+    }
+
+    /** The venv's own Python interpreter ({@code Scripts/python.exe} or {@code bin/python}), when it has one. */
+    static Optional<Path> venvInterpreter(Path venv) {
+        for (String p : List.of("Scripts/python.exe", "bin/python", "bin/python3")) {
+            Path exe = venv.resolve(p);
+            if (Files.exists(exe, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                return Optional.of(exe);
+            }
+        }
+        return Optional.empty();
+    }
+
+    // ------------------------------------------------------------------------------------------ creating the venv
+
+    private static TargetPlatform.Os currentOs() {
+        String n = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        return n.contains("win") ? TargetPlatform.Os.WINDOWS : n.contains("mac") ? TargetPlatform.Os.MAC : TargetPlatform.Os.LINUX;
+    }
+
+    /**
+     * Creates the project's virtual environment so packages never go into the computer's global Python. With a Python
+     * interpreter of the user's operating system at hand (ORBIT running directly on the computer) this is a real
+     * {@code python -m venv}. Otherwise (ORBIT in Docker) ORBIT writes the same layout - {@code pyvenv.cfg},
+     * {@code site-packages}, a {@code Scripts} / {@code bin} folder - and {@code python -m venv <folder>} later adds the
+     * interpreter while keeping the installed packages.
+     */
+    private Venv createVenv(ProjectFiles files, UnitSpec unit, Venv planned, InstallContext ctx) throws IOException {
+        String rel = files.root().relativize(planned.dir()).toString().replace('\\', '/');
+        if (currentOs() == ctx.platform().os()) {
+            for (List<String> python : interpreters(planned.pythonVersion(), ctx.platform().os())) {
+                ctx.checkCancelled();
+                Optional<String> version = runPython(python, List.of("-c", "import sys;print('%d.%d' % sys.version_info[:2])"),
+                        files.root(), 20, ctx);
+                if (version.isEmpty() || !version.get().trim().matches("\\d+\\.\\d+")) {
+                    continue;
+                }
+                ctx.progress().step("Creating the virtual environment " + rel + " (Python " + version.get().trim() + ")", 0, 0);
+                List<String> args = new ArrayList<>(List.of("-m", "venv", planned.dir().toString()));
+                Optional<String> made = runPython(python, args, files.root(), 300, ctx);
+                if (made.isEmpty()) {
+                    args.add(2, "--without-pip"); // ensurepip missing (Debian's python3 without python3-venv)
+                    made = runPython(python, args, files.root(), 120, ctx);
+                }
+                if (made.isPresent() && sitePackagesOf(planned.dir()).isPresent()) {
+                    Path ignore = planned.dir().resolve(".gitignore"); // Python 3.13+ writes one, older ones do not
+                    if (!Files.exists(ignore)) {
+                        Files.writeString(ignore, "# created by ORBIT (Setup Dependencies)\n*\n");
+                    }
+                    ctx.progress().log("Created the virtual environment " + rel + " with " + String.join(" ", python)
+                            + " (Python " + version.get().trim() + ")");
+                    return new Venv(planned.dir(), sitePackagesOf(planned.dir()).get(), true, venvPython(planned.dir()).orElse(version.get().trim()));
+                }
+            }
+        }
+        // no interpreter reachable from ORBIT: the venv layout, completed by `python -m venv` on the computer
+        Files.createDirectories(planned.sitePackages());
+        Files.createDirectories(planned.dir().resolve(ctx.platform().os() == TargetPlatform.Os.WINDOWS ? "Scripts" : "bin"));
+        int[] mm = ctx.platform().withPython(planned.pythonVersion()).pythonMajorMinor();
+        Files.writeString(planned.dir().resolve("pyvenv.cfg"), "include-system-site-packages = false\n"
+                + "version = " + mm[0] + "." + mm[1] + ".0\n"
+                + "created-by = ORBIT Setup Dependencies (run: python -m venv " + rel + "  - adds the interpreter, keeps the packages)\n");
+        Path ignore = planned.dir().resolve(".gitignore");
+        if (!Files.exists(ignore)) {
+            Files.writeString(ignore, "# created by ORBIT (Setup Dependencies)\n*\n");
+        }
+        ctx.progress().log("Created the virtual environment " + rel + " for Python " + mm[0] + "." + mm[1] + " on "
+                + ctx.platform().pyPlatformSystem() + ". Python is not reachable from ORBIT, so the interpreter is not in it yet: run "
+                + "\"python -m venv " + rel + "\" in the project folder once (the packages stay)");
+        return new Venv(planned.dir(), planned.sitePackages(), true, mm[0] + "." + mm[1]);
+    }
+
+    private static List<List<String>> interpreters(String version, TargetPlatform.Os os) {
+        List<List<String>> out = new ArrayList<>();
+        if (os == TargetPlatform.Os.WINDOWS) {
+            if (version != null) {
+                out.add(List.of("py", "-" + version));
+            }
+            out.add(List.of("py", "-3"));
+            out.add(List.of("python"));
+            out.add(List.of("python3"));
+        } else {
+            if (version != null) {
+                out.add(List.of("python" + version));
+            }
+            out.add(List.of("python3"));
+            out.add(List.of("python"));
+        }
+        return out;
+    }
+
+    /** Runs Python; the output when it exits with 0 within {@code timeoutSeconds}. Stopped at once on Cancel. */
+    private static Optional<String> runPython(List<String> python, List<String> args, Path cwd, int timeoutSeconds,
+                                              InstallContext ctx) throws IOException {
+        List<String> cmd = new ArrayList<>(python);
+        cmd.addAll(args);
+        Path out = Files.createTempFile("orbit-python", ".txt");
+        Process p;
+        try {
+            p = new ProcessBuilder(cmd).directory(cwd.toFile()).redirectErrorStream(true).redirectOutput(out.toFile()).start();
+        } catch (IOException e) {
+            Files.deleteIfExists(out);
+            return Optional.empty(); // not installed
+        }
+        Runnable kill = () -> {
+            p.descendants().forEach(ProcessHandle::destroyForcibly); // py.exe starts the real python.exe
+            p.destroyForcibly();
+        };
+        try (AutoCloseable stop = ctx.onCancel(kill)) {
+            long deadline = System.nanoTime() + timeoutSeconds * 1_000_000_000L;
+            while (!p.waitFor(200, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                if (ctx.cancelled() || System.nanoTime() > deadline) {
+                    kill.run();
+                    ctx.checkCancelled();
+                    return Optional.empty();
+                }
+            }
+            String text = Files.readString(out, StandardCharsets.UTF_8);
+            return p.exitValue() == 0 ? Optional.of(text) : Optional.empty();
+        } catch (InterruptedException e) {
+            kill.run();
+            Thread.currentThread().interrupt();
+            throw new IOException("Setup cancelled");
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            return Optional.empty();
+        } finally {
+            try {
+                Files.deleteIfExists(out);
+            } catch (IOException e) {
+                out.toFile().deleteOnExit(); // still open in a process that is shutting down (Windows)
+            }
+        }
+    }
+
+    /** The top-level modules an installed distribution provides (its {@code top_level.txt}). */
+    static List<String> topLevel(Path site, String key) {
+        List<String> out = new ArrayList<>();
+        try {
+            for (Path dist : distInfos(site, key)) {
+                Path t = dist.resolve("top_level.txt");
+                if (Files.isRegularFile(t)) {
+                    for (String l : Files.readAllLines(t, StandardCharsets.UTF_8)) {
+                        if (!l.isBlank()) {
+                            out.add(l.trim().replace('/', '.'));
+                        }
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+            // none
+        }
+        return out;
     }
 
     private static Optional<String> pythonVersionHint(ProjectFiles files, UnitSpec unit) {
@@ -447,16 +628,26 @@ public final class PythonSupport implements EcosystemSupport {
         TargetPlatform platform = ctx.platform().withPython(venv.pythonVersion());
         Map<String, String> env = markerEnv(platform);
         Map<String, String> installed = venv.exists() ? installed(venv.sitePackages()) : Map.of();
+        CodeUsage usage = ctx.usage(files.root());
         List<Item> items = new ArrayList<>();
+        int unused = 0;
         for (Declared d : declared(files, unit)) {
             Requirement r = d.req();
             if (!Pep440.marker(r.marker(), env, Set.of())) {
                 continue; // not for this operating system / Python version
             }
-            String have = installed.get(Pep440.normalizeName(r.name()));
+            String key = Pep440.normalizeName(r.name());
+            String have = installed.get(key);
             String required = r.specifier().isEmpty() ? null : r.specifier().toString();
+            boolean used = "local".equals(d.unsupported())
+                    || usage.pyUsed(unit.key(), r.name(), have == null ? List.of() : topLevel(venv.sitePackages(), key));
             if ("local".equals(d.unsupported())) {
                 items.add(new Item(r.name(), d.raw(), have, d.scope(), DependencyState.LOCAL, "local path"));
+            } else if (!used && (have == null || !(r.specifier().isEmpty()
+                    || Pep440.parse(have).map(v -> r.specifier().test(v, true)).orElse(true)))) {
+                unused++;
+                items.add(new Item(r.name(), required == null ? d.raw() : required, have, d.scope(), DependencyState.UNUSED,
+                        "not imported anywhere in the code - not downloaded"));
             } else if (have == null) {
                 items.add(new Item(r.name(), required == null ? d.raw() : required, null, d.scope(),
                         d.unsupported() != null ? DependencyState.UNSUPPORTED : DependencyState.MISSING, d.unsupported()));
@@ -467,7 +658,18 @@ public final class PythonSupport implements EcosystemSupport {
             }
         }
         String location = files.root().relativize(venv.dir()).toString().replace('\\', '/');
-        String message = venv.exists() ? null : "No virtual environment yet: Setup Dependencies creates " + location;
+        List<String> notes = new ArrayList<>();
+        if (!venv.exists()) {
+            notes.add("No virtual environment yet: Setup Dependencies creates " + location
+                    + " so the packages are installed for this project only, not into the computer's Python");
+        } else if (venvInterpreter(venv.dir()).isEmpty()) {
+            notes.add("Packages are in the virtual environment " + location + "; run \"python -m venv " + location
+                    + "\" once to add the Python interpreter (the packages are kept)");
+        }
+        if (unused > 0) {
+            notes.add(unused + (unused == 1 ? " requirement is" : " requirements are") + " not used by the code and not downloaded");
+        }
+        String message = notes.isEmpty() ? null : String.join(". ", notes);
         return DependencyReport.Unit.of(Ecosystem.PYTHON, String.join(", ", unit.manifests()), location, message, items, false);
     }
 
@@ -486,20 +688,33 @@ public final class PythonSupport implements EcosystemSupport {
         if (!ctx.claim("python:" + venv.dir())) {
             return;
         }
+        if (!venv.exists()) {
+            venv = createVenv(files, unit, venv, ctx);
+        } else {
+            ctx.progress().log("Installing into the virtual environment " + files.root().relativize(venv.dir()).toString().replace('\\', '/')
+                    + (venv.pythonVersion() == null ? "" : " (Python " + venv.pythonVersion() + ")"));
+        }
         TargetPlatform platform = ctx.platform().withPython(venv.pythonVersion());
         Map<String, String> env = markerEnv(platform);
-        Map<String, String> installed = venv.exists() ? installed(venv.sitePackages()) : new HashMap<>();
+        Map<String, String> installed = installed(venv.sitePackages());
         Files.createDirectories(venv.sitePackages());
-        if (!venv.exists()) {
-            Files.writeString(venv.dir().resolve(".gitignore"), "# created by ORBIT (Setup Dependencies)\n*\n");
-            ctx.progress().log("Created " + files.root().relativize(venv.dir()) + " for Python " + platform.pythonVersion()
-                    + " on " + platform.pyPlatformSystem());
-        }
+        final Venv target = venv;
 
-        record Want(String name, Specifier spec, Set<String> extras, String from) {
+        record Want(String name, Specifier spec, Set<String> extras, String from, Declared origin) {
         }
+        List<RequirementUpdate> updates = new ArrayList<>();
         Deque<Want> queue = new ArrayDeque<>();
+        ctx.progress().step("Resolving versions on PyPI", 0, 0);
+        CodeUsage usage = ctx.skipUnused() ? ctx.usage(files.root()) : CodeUsage.everything();
+        // declared but never used by the code: not downloaded, but their pins still apply if another package needs them
+        Map<String, Declared> unusedPins = new HashMap<>();
         for (Declared d : declared(files, unit)) {
+            String dk = Pep440.normalizeName(d.req().name());
+            if (!"local".equals(d.unsupported()) && Pep440.marker(d.req().marker(), env, Set.of())
+                    && !usage.pyUsed(unit.key(), d.req().name(), topLevel(venv.sitePackages(), dk))) {
+                unusedPins.put(dk, d);
+                continue;
+            }
             if (d.unsupported() != null) {
                 if (!"local".equals(d.unsupported()) && !installed.containsKey(Pep440.normalizeName(d.req().name()))) {
                     ctx.fail(d.req().name() + ": " + d.unsupported());
@@ -507,8 +722,12 @@ public final class PythonSupport implements EcosystemSupport {
                 continue;
             }
             if (Pep440.marker(d.req().marker(), env, Set.of())) {
-                queue.add(new Want(d.req().name(), d.req().specifier(), d.req().extras(), "project"));
+                queue.add(new Want(d.req().name(), d.req().specifier(), d.req().extras(), "project", d));
             }
+        }
+        if (!unusedPins.isEmpty()) {
+            List<String> names = unusedPins.values().stream().map(d -> d.req().name()).sorted(String.CASE_INSENSITIVE_ORDER).toList();
+            ctx.progress().log("Not used by the code, not downloaded (" + names.size() + "): " + String.join(", ", names));
         }
         Map<String, Chosen> chosen = new LinkedHashMap<>();
         Map<String, JsonNode> projects = new HashMap<>();
@@ -517,7 +736,10 @@ public final class PythonSupport implements EcosystemSupport {
             Want w = queue.poll();
             String key = Pep440.normalizeName(w.name());
             Chosen have = chosen.get(key);
-            Specifier spec = have == null ? w.spec() : have.spec().and(w.spec());
+            Declared pin = unusedPins.get(key);
+            // needed by a used package after all: the project's pin of it applies
+            Specifier base = pin != null && have == null ? w.spec().and(pin.req().specifier()) : w.spec();
+            Specifier spec = have == null ? base : have.spec().and(base);
             Set<String> extras = new LinkedHashSet<>(w.extras());
             if (have != null) {
                 extras.addAll(have.extras());
@@ -525,14 +747,14 @@ public final class PythonSupport implements EcosystemSupport {
                     continue;
                 }
             }
-            ctx.progress().step("resolving " + w.name(), chosen.size(), chosen.size() + queue.size() + 1);
+            ctx.progress().step("Resolving versions on PyPI: " + w.name(), 0, 0);
             Chosen c;
             List<String> requires;
             String local = installed.get(key);
             if (local != null && Pep440.parse(local).map(v -> spec.test(v, true)).orElse(false)
                     && (have == null || have.wheel() == null)) {
                 c = new Chosen(w.name(), local, null, extras, spec);
-                requires = installedRequires(venv.sitePackages(), key);
+                requires = installedRequires(target.sitePackages(), key);
             } else {
                 Optional<Chosen> pick;
                 try {
@@ -544,10 +766,35 @@ public final class PythonSupport implements EcosystemSupport {
                     ctx.fail(w.name() + ": " + e.getMessage());
                     continue;
                 }
+                String why = "no ready-made package (wheel) for " + platform.pyPlatformSystem() + " / Python "
+                        + platform.pythonVersion();
+                if (pick.isEmpty() && w.origin() != null && have == null) {
+                    // the version the project asks for cannot be installed here: take a newer one that can
+                    Optional<Chosen> newer;
+                    try {
+                        newer = pickNewer(w.name(), spec, extras, platform, projects, ctx);
+                    } catch (IOException e) {
+                        newer = Optional.empty();
+                    }
+                    if (newer.isPresent()) {
+                        Declared o = w.origin();
+                        boolean editable = o.source() != null && o.line() >= 0;
+                        if (editable && ctx.updateManifests()) {
+                            pick = newer;
+                            updates.add(new RequirementUpdate(o.source(), o.line(), w.name(), spec.toString(), newer.get().version(), why));
+                            ctx.progress().log("Cannot install " + w.name() + " " + spec + " (" + why + ") - using "
+                                    + newer.get().version() + " instead");
+                        } else {
+                            ctx.fail(w.name() + " " + spec + ": " + why + " - version " + newer.get().version() + " works: "
+                                    + (editable ? "allow ORBIT to update requirements files, or change it yourself"
+                                    : "change the version in " + (o.source() == null ? "the manifest" : o.source())));
+                            continue;
+                        }
+                    }
+                }
                 if (pick.isEmpty()) {
-                    ctx.fail(w.name() + (spec.isEmpty() ? "" : " " + spec) + ": no ready-made package (wheel) for "
-                            + platform.pyPlatformSystem() + " / Python " + platform.pythonVersion()
-                            + " - it has to be built from source with pip");
+                    ctx.fail(w.name() + (spec.isEmpty() ? "" : " " + spec) + ": " + why
+                            + " and no newer version has one - it has to be built from source with pip");
                     continue;
                 }
                 c = pick.get();
@@ -567,11 +814,12 @@ public final class PythonSupport implements EcosystemSupport {
                 if (r.isEmpty() || r.get().url() != null || !Pep440.marker(r.get().marker(), env, extras)) {
                     continue;
                 }
-                queue.add(new Want(r.get().name(), r.get().specifier(), r.get().extras(), c.name()));
+                queue.add(new Want(r.get().name(), r.get().specifier(), r.get().extras(), c.name(), null));
             }
         }
 
         List<Chosen> todo = chosen.values().stream().filter(c -> c.wheel() != null).toList();
+        java.util.Set<String> failedInstall = java.util.concurrent.ConcurrentHashMap.newKeySet();
         ctx.progress().log(todo.size() + " of " + chosen.size() + " Python packages to download");
         AtomicInteger done = new AtomicInteger();
         List<Callable<Void>> tasks = new ArrayList<>();
@@ -579,19 +827,134 @@ public final class PythonSupport implements EcosystemSupport {
             tasks.add(() -> {
                 ctx.checkCancelled();
                 try {
-                    installWheel(venv, c, ctx);
+                    installWheel(target, c, ctx);
+                    ctx.installed(c.name() + " " + c.version(), done.incrementAndGet(), todo.size());
                 } catch (IOException e) {
+                    failedInstall.add(Pep440.normalizeName(c.name()));
                     ctx.fail(c.name() + " " + c.version() + ": " + e.getMessage());
+                    ctx.progress().step(c.name() + " " + c.version(), done.incrementAndGet(), todo.size());
                 }
-                ctx.progress().step(c.name() + " " + c.version(), done.incrementAndGet(), todo.size());
                 return null;
             });
         }
         ctx.runAll(tasks);
+        // the newer versions that were really installed are written into the requirements files
+        List<RequirementUpdate> applied = updates.stream()
+                .filter(u -> !failedInstall.contains(Pep440.normalizeName(u.name()))).toList();
+        for (RequirementUpdate u : applied) {
+            try {
+                updateRequirementLine(files.root(), u);
+                ctx.manifestChanged(u.file(), u.name(), u.from(), "==" + u.to(), u.reason());
+            } catch (IOException e) {
+                ctx.fail(u.name() + ": installed " + u.to() + " but " + u.file() + " could not be updated: " + e.getMessage());
+            }
+        }
+    }
+
+    /** A requirement whose pinned version could not be installed and was replaced by a newer one. */
+    record RequirementUpdate(String file, int line, String name, String from, String to, String reason) {
+    }
+
+    /** Backup suffix of a requirements file ORBIT changed (written once, before the first change). */
+    public static final String BACKUP_SUFFIX = ".orbit-backup";
+
+    /** Rewrites one line of a requirements file to {@code name==version}, keeping extras, markers and comments. */
+    static void updateRequirementLine(Path projectRoot, RequirementUpdate u) throws IOException {
+        Path file = projectRoot.resolve(u.file()).normalize();
+        if (!file.startsWith(projectRoot)) {
+            throw new IOException("not inside the project");
+        }
+        String text = Files.readString(file, StandardCharsets.UTF_8);
+        boolean bom = !text.isEmpty() && text.charAt(0) == '\uFEFF';
+        String body = bom ? text.substring(1) : text;
+        String nl = body.contains("\r\n") ? "\r\n" : "\n";
+        String[] lines = body.split("\r?\n", -1);
+        if (u.line() < 0 || u.line() >= lines.length) {
+            throw new IOException("line " + (u.line() + 1) + " no longer exists");
+        }
+        String updated = rewriteRequirement(lines[u.line()], u.name(), u.to(), u.from(), u.reason());
+        if (updated == null) {
+            throw new IOException("line " + (u.line() + 1) + " no longer declares " + u.name());
+        }
+        Path backup = file.resolveSibling(file.getFileName() + BACKUP_SUFFIX);
+        if (!Files.exists(backup)) {
+            Files.copy(file, backup);
+        }
+        lines[u.line()] = updated;
+        Files.writeString(file, (bom ? "\uFEFF" : "") + String.join(nl, lines), StandardCharsets.UTF_8);
+    }
+
+    private static final Pattern REQUIREMENT_LINE = Pattern.compile(
+            "^(\\s*)([A-Za-z0-9][A-Za-z0-9._-]*)(\\s*\\[[^\\]]*\\])?\\s*([^;#]*?)\\s*(;[^#]*?)?\\s*(#.*)?$");
+
+    /**
+     * {@code numpy==1.21.0 ; python_version < "3.13"  # math} becomes
+     * {@code numpy==1.26.4 ; python_version < "3.13"  # math (updated by ORBIT: was ==1.21.0, ...)}; null when the line
+     * does not declare {@code name}.
+     */
+    static String rewriteRequirement(String line, String name, String version, String from, String reason) {
+        Matcher m = REQUIREMENT_LINE.matcher(line);
+        if (!m.matches() || !Pep440.normalizeName(m.group(2)).equals(Pep440.normalizeName(name))) {
+            return null;
+        }
+        String note = "updated by ORBIT: was " + (from == null || from.isBlank() ? "unpinned" : from) + " - " + reason;
+        String comment = m.group(6) == null ? "# " + note : m.group(6).trim() + " (" + note + ")";
+        return m.group(1) + m.group(2) + (m.group(3) == null ? "" : m.group(3).trim()) + "==" + version
+                + (m.group(5) == null ? "" : " " + m.group(5).trim()) + "  " + comment;
+    }
+
+    /** The installable releases of a package for the target: version -> best wheel. */
+    private record Available(String canonical, Map<Pep440.Version, Wheel> wheels, Map<Pep440.Version, String> text) {
     }
 
     private Optional<Chosen> pick(String name, Specifier spec, Set<String> extras, TargetPlatform platform,
                                   Map<String, JsonNode> cache, InstallContext ctx) throws IOException {
+        Available a = available(name, platform, cache, ctx);
+        List<Pep440.Version> candidates = new ArrayList<>(a.wheels().keySet());
+        candidates.sort((x, y) -> y.compareTo(x));
+        // like pip: pre-releases only when no final release fits
+        for (boolean pre : new boolean[]{false, true}) {
+            for (Pep440.Version v : candidates) {
+                if (spec.test(v, pre)) {
+                    return Optional.of(new Chosen(a.canonical() == null ? name : a.canonical(), a.text().get(v), a.wheels().get(v), extras, spec));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * A newer release that CAN be installed when the requested one cannot: the newest final release above the
+     * requested version with the same major version (fewest breaking changes), otherwise the newest final release.
+     */
+    private Optional<Chosen> pickNewer(String name, Specifier spec, Set<String> extras, TargetPlatform platform,
+                                       Map<String, JsonNode> cache, InstallContext ctx) throws IOException {
+        Available a = available(name, platform, cache, ctx);
+        Optional<Pep440.Version> v = newerVersion(a.wheels().keySet(), spec.lowerBound().orElse(null));
+        return v.map(x -> new Chosen(a.canonical() == null ? name : a.canonical(), a.text().get(x), a.wheels().get(x), extras,
+                Pep440.specifier("==" + a.text().get(x))));
+    }
+
+    static Optional<Pep440.Version> newerVersion(java.util.Collection<Pep440.Version> installable, Pep440.Version requested) {
+        Pep440.Version sameMajor = null;
+        Pep440.Version newest = null;
+        for (Pep440.Version v : installable) {
+            if (v.isPrerelease() || (requested != null && v.compareTo(requested) <= 0)) {
+                continue;
+            }
+            if (newest == null || v.compareTo(newest) > 0) {
+                newest = v;
+            }
+            if (requested != null && v.epoch() == requested.epoch() && v.release().get(0).equals(requested.release().get(0))
+                    && (sameMajor == null || v.compareTo(sameMajor) > 0)) {
+                sameMajor = v;
+            }
+        }
+        return Optional.ofNullable(sameMajor != null ? sameMajor : newest);
+    }
+
+    private Available available(String name, TargetPlatform platform, Map<String, JsonNode> cache, InstallContext ctx)
+            throws IOException {
         String key = Pep440.normalizeName(name);
         JsonNode project = cache.get(key);
         if (project == null) {
@@ -630,17 +993,7 @@ public final class PythonSupport implements EcosystemSupport {
                 text.put(v.get(), parts[1]);
             }
         }
-        List<Pep440.Version> candidates = new ArrayList<>(wheels.keySet());
-        candidates.sort((a, b) -> b.compareTo(a));
-        // like pip: pre-releases only when no final release fits
-        for (boolean pre : new boolean[]{false, true}) {
-            for (Pep440.Version v : candidates) {
-                if (spec.test(v, pre)) {
-                    return Optional.of(new Chosen(canonical == null ? name : canonical, text.get(v), wheels.get(v), extras, spec));
-                }
-            }
-        }
-        return Optional.empty();
+        return new Available(canonical, wheels, text);
     }
 
     private static List<String> requiresDist(String name, String version, InstallContext ctx) throws IOException {

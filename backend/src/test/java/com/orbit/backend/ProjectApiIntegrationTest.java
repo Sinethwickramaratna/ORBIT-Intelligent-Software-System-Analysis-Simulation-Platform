@@ -23,8 +23,10 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -234,6 +236,72 @@ class ProjectApiIntegrationTest {
             send(get("/api/projects/" + id + "/tree").param("path", bad), null, token)
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PROJECT_PATH_INVALID"));
         }
+    }
+
+    @Test
+    void editFileOpensSavesAndRefusesStaleOrForeignSaves() throws Exception {
+        String token = login("editor-user");
+        String other = login("editor-intruder");
+        Path folder = workspace.resolve("edit-app");
+        Files.createDirectories(folder.resolve("src"));
+        Files.writeString(folder.resolve("src/main.ts"), "console.log(1);\r\n");
+        String id = body(send(post("/api/projects"), newProject("Edit", folder, "WEB_APPLICATION", false), token)
+                .andExpect(status().isCreated())).get("projectId").textValue();
+
+        JsonNode opened = body(send(get("/api/projects/" + id + "/file").param("path", "src/main.ts"), null, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").value("console.log(1);\r\n"))
+                .andExpect(jsonPath("$.lineEnding").value("CRLF"))
+                .andExpect(jsonPath("$.name").value("main.ts")));
+        long modified = opened.get("lastModified").asLong();
+
+        send(put("/api/projects/" + id + "/file"), Map.of("path", "src/main.ts", "content", "console.log(2);\r\n",
+                "bom", false, "expectedLastModified", modified), token)
+                .andExpect(status().isOk()).andExpect(jsonPath("$.size").value(17));
+        assertThat(Files.readString(folder.resolve("src/main.ts"))).isEqualTo("console.log(2);\r\n");
+
+        send(put("/api/projects/" + id + "/file"), Map.of("path", "src/main.ts", "content", "stale",
+                "bom", false, "expectedLastModified", modified - 60_000), token)
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("FILE_CHANGED_ON_DISK"));
+        send(put("/api/projects/" + id + "/file"), Map.of("path", "src/main.ts", "content", "hacked", "bom", false), other)
+                .andExpect(status().isNotFound());
+        send(get("/api/projects/" + id + "/file").param("path", "../../etc/passwd"), null, token)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("PROJECT_PATH_INVALID"));
+        assertThat(Files.readString(folder.resolve("src/main.ts"))).isEqualTo("console.log(2);\r\n");
+    }
+
+    @Test
+    void createRenameDeleteFilesAndFoldersThroughTheApi() throws Exception {
+        String token = login("explorer-user");
+        Path folder = workspace.resolve("explorer-app");
+        Files.createDirectories(folder.resolve("src"));
+        String id = body(send(post("/api/projects"), newProject("Explorer", folder, "OTHER", false), token)
+                .andExpect(status().isCreated())).get("projectId").textValue();
+        String files = "/api/projects/" + id + "/files";
+
+        send(post(files), Map.of("parent", "", "name", "NewFolder1", "kind", "FOLDER"), token)
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.path").value("NewFolder1"))
+                .andExpect(jsonPath("$.kind").value("FOLDER"));
+        send(post(files), Map.of("parent", "src", "name", "NewFile1.txt", "kind", "FILE"), token)
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.path").value("src/NewFile1.txt"));
+        send(post(files), Map.of("parent", "src", "name", "NewFile1.txt", "kind", "FILE"), token)
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("FILE_ALREADY_EXISTS"));
+        send(post(files), Map.of("parent", "", "name", "bad/name", "kind", "FILE"), token)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("FILE_NAME_INVALID"));
+        assertThat(folder.resolve("NewFolder1")).isDirectory();
+        assertThat(folder.resolve("src/NewFile1.txt")).isRegularFile();
+
+        send(post(files + "/rename"), Map.of("path", "src/NewFile1.txt", "newName", "app.ts"), token)
+                .andExpect(status().isOk()).andExpect(jsonPath("$.path").value("src/app.ts"));
+        assertThat(folder.resolve("src/app.ts")).isRegularFile();
+        assertThat(folder.resolve("src/NewFile1.txt")).doesNotExist();
+
+        send(delete(files).param("path", "NewFolder1"), null, token).andExpect(status().isNoContent());
+        send(delete(files).param("path", "src"), null, token).andExpect(status().isNoContent());
+        send(delete(files).param("path", ""), null, token).andExpect(status().isBadRequest());
+        assertThat(folder.resolve("NewFolder1")).doesNotExist();
+        assertThat(folder.resolve("src")).doesNotExist();
+        assertThat(folder).isDirectory();
     }
 
     @Test

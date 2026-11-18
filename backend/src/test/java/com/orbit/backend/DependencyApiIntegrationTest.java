@@ -145,6 +145,15 @@ class DependencyApiIntegrationTest {
                 .andExpect(jsonPath("$.units[0].dependencies[0].installed").value("1.3.0"));
         // the stored result is the new one
         send(get("/api/projects/" + id + "/dependencies"), null, token).andExpect(jsonPath("$.status").value("INSTALLED"));
+        // and the check's progress shows what it did, step by step
+        send(get("/api/projects/" + id + "/dependencies/check/progress"), null, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.kind").value("CHECK"))
+                .andExpect(jsonPath("$.state").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.percent").value(100))
+                .andExpect(jsonPath("$.steps[0].title").value("Check Node.js (npm) - package.json"))
+                .andExpect(jsonPath("$.steps[0].state").value("DONE"))
+                .andExpect(jsonPath("$.steps[0].summary").value("1 installed"));
     }
 
     @Test
@@ -159,6 +168,8 @@ class DependencyApiIntegrationTest {
         assertThat(done.get("state").textValue()).isEqualTo("SUCCEEDED");
         assertThat(done.get("percent").intValue()).isEqualTo(100);
         assertThat(done.get("failures")).isEmpty();
+        assertThat(done.get("steps")).isEmpty(); // nothing was missing, so there was nothing to do
+        assertThat(done.get("log").toString()).contains("Nothing is missing");
         send(get("/api/projects/" + id + "/dependencies"), null, token).andExpect(jsonPath("$.status").value("INSTALLED"));
     }
 
@@ -174,7 +185,14 @@ class DependencyApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("DEPENDENCY_SETUP_RUNNING"));
         JsonNode done = waitForSetup(token, id);
         assertThat(done.get("state").textValue()).isEqualTo("FAILED");
+        assertThat(done.get("kind").textValue()).isEqualTo("SETUP");
         assertThat(done.get("failures").toString()).contains("left-pad");
+        assertThat(done.get("failed").intValue()).isPositive();
+        assertThat(done.get("installed").intValue()).isZero();
+        assertThat(done.get("steps")).hasSize(1);
+        assertThat(done.get("steps").get(0).get("title").textValue()).isEqualTo("Node.js (npm) - package.json");
+        assertThat(done.get("steps").get(0).get("state").textValue()).isEqualTo("FAILED");
+        assertThat(done.get("steps").get(0).get("summary").textValue()).contains("failed");
         assertThat(done.get("log").toString()).contains("Node.js (npm)");
         send(get("/api/projects/" + id + "/dependencies"), null, token)
                 .andExpect(jsonPath("$.status").value("MISSING"))
