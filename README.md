@@ -120,6 +120,9 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
    **+** (or **`` Ctrl+Shift+` ``**) opens another terminal, **Split Terminal** puts a second terminal next to the active one
    in the same tab (up to 4 side by side), and the list on the right switches between them; **Kill Terminal** (trash)
    closes one and ends its shell and everything still running in it. Closing the project ends all its terminals.
+   Like VS Code: **Ctrl+C** stops the running command (it copies instead when text is selected; Ctrl+Shift+C always
+   copies, Ctrl+V pastes), and **links** in the output (`http://…`, `https://…`) are underlined on hover and open in
+   a new browser tab with **Ctrl+click** (Cmd+click on macOS).
    Terminals run on **your computer**, not in Docker, through the small **ORBIT terminal helper** (see *Terminal helper*).
 10. **Scan again:** after the folder changed, press **Scan** in the Explorer; a progress bar shows how far it is.
 11. **Delete a project:** the three dots next to a project -> **Delete**, then type its name. This removes it from ORBIT

@@ -874,3 +874,18 @@
 .problems-indicator:hover, .tools-btn:hover, .status-problems:hover { color: var(--text); background: var(--surface-2); }
 .tools-btn.active { color: var(--accent); }
 .status-problems { padding: 0 4px; }
+
+/* dependency controls in the tab bar (next to Problems and the terminal button) */
+.dep-toolbar.compact { gap: 6px; }
+.dep-toolbar.compact .dep-btn { height: 24px; padding: 0 8px; gap: 5px; font-size: 12px; }
+.dep-toolbar.compact .dep-btn svg { width: 13px; height: 13px; }
+.dep-toolbar.compact .dep-running { font-size: 11px; }
+.tools-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--border); }
+
+/* "Follow link (ctrl + click)" hint over links in the terminal, like VS Code */
+.terminal-view { position: relative; }
+.terminal-link-hint {
+  position: absolute; z-index: 5; transform: translate(10px, calc(-100% - 6px)); pointer-events: none; white-space: nowrap;
+  padding: 3px 8px; font-size: 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 4px; box-shadow: 0 6px 16px -6px rgba(0, 0, 0, .5);
+}

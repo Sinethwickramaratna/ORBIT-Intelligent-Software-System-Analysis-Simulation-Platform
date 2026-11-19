@@ -8,6 +8,7 @@ import { languageForPath, languageName } from "@/lib/languages";
 import CodeEditor, { disposeModel, modelPath, readModelText, takeModelText } from "./CodeEditor";
 import ConfirmDialog from "./ConfirmDialog";
 import FileTree from "./FileTree";
+import DependencyToolbar from "./DependencyToolbar";
 import BottomPanel, { ErrorIcon, WarningIcon, type PanelTab, type Problem } from "./BottomPanel";
 import { loader } from "@monaco-editor/react";
 import { installSyntaxChecker } from "@/lib/diagnostics";
@@ -431,6 +432,8 @@ export default function ProjectWorkspace({
             );
           })}
           <div className="editor-tabs-tools">
+            <DependencyToolbar dep={dependencies} compact />
+            <span className="tools-sep" aria-hidden="true" />
             <button
               type="button"
               className={`problems-indicator${problems.some((p) => p.severity === "error") ? " has-errors" : ""}`}

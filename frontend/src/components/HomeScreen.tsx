@@ -10,7 +10,6 @@ import CloneDialog from "./CloneDialog";
 import ProjectMenu from "./ProjectMenu";
 import DeleteProjectDialog from "./DeleteProjectDialog";
 import ProjectWorkspace from "./ProjectWorkspace";
-import DependencyToolbar from "./DependencyToolbar";
 import DependencySetupDialog from "./DependencySetupDialog";
 import DependencyProgressDialog from "./DependencyProgressDialog";
 import { useDependencies } from "@/lib/useDependencies";
@@ -259,11 +258,6 @@ export default function HomeScreen({ user, onLoggedOut }: { user: User; onLogged
             ))}
           </nav>
         </div>
-        {active && (
-          <div className="menubar-center">
-            <DependencyToolbar dep={dependencies} />
-          </div>
-        )}
         <div className="menubar-right">
           <button type="button" className="btn ghost signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign Out"}

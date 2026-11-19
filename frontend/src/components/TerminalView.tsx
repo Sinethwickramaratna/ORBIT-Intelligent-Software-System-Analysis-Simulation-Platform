@@ -42,6 +42,9 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** "Follow link (ctrl + click)" hint while the mouse is over a link, like VS Code. */
+  const [linkHint, setLinkHint] = useState<{ x: number; y: number } | null>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(onState);
   stateRef.current = onState;
 
@@ -49,6 +52,7 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
     let disposed = false;
     let ro: ResizeObserver | null = null;
     let mo: MutationObserver | null = null;
+    let offEnter: (() => void) | null = null;
     const fail = (message: string) => {
       if (disposed) return;
       setError(message);
@@ -57,7 +61,11 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
 
     (async () => {
       // xterm touches `window` when imported, so it is loaded in the browser only
-      const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
+      const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
+        import("@xterm/addon-web-links"),
+      ]);
       if (disposed || !hostRef.current) return;
       const term = new Terminal({
         fontFamily: '"Source Code Pro", ui-monospace, "Cascadia Code", Consolas, monospace',
@@ -70,6 +78,31 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
+      // links (http/https) in the output: underlined on hover, opened with Ctrl+click (Cmd+click on macOS) in a new
+      // browser tab, like VS Code; a plain click stays free for selecting text
+      term.loadAddon(
+        new WebLinksAddon(
+          (event, uri) => {
+            if (!(event.ctrlKey || event.metaKey)) return;
+            let url: URL;
+            try {
+              url = new URL(uri);
+            } catch {
+              return;
+            }
+            if (url.protocol !== "http:" && url.protocol !== "https:") return;
+            event.preventDefault();
+            window.open(url.href, "_blank", "noopener,noreferrer");
+          },
+          {
+            hover: (event) => {
+              const box = viewRef.current?.getBoundingClientRect();
+              if (box) setLinkHint({ x: event.clientX - box.left, y: event.clientY - box.top });
+            },
+            leave: () => setLinkHint(null),
+          },
+        ),
+      );
       term.open(hostRef.current);
       termRef.current = term;
       fitRef.current = fit;
@@ -78,8 +111,23 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
       } catch {
         /* not laid out yet */
       }
-      // keys the app needs even while the terminal has the focus: Ctrl+` (panel), Ctrl+Shift+` (new terminal)
-      term.attachCustomKeyEventHandler((e) => !((e.ctrlKey || e.metaKey) && (e.key === "`" || e.code === "Backquote")));
+      term.attachCustomKeyEventHandler((e) => {
+        // keys the app needs even while the terminal has the focus: Ctrl+` (panel), Ctrl+Shift+` (new terminal)
+        if ((e.ctrlKey || e.metaKey) && (e.key === "`" || e.code === "Backquote")) return false;
+        if (!e.ctrlKey || e.altKey || e.metaKey) return true;
+        const copy = () => {
+          void navigator.clipboard?.writeText(term.getSelection()).catch(() => undefined);
+          term.clearSelection();
+          e.preventDefault();
+          return false;
+        };
+        // like VS Code: Ctrl+C copies when text is selected, otherwise it goes to the shell and stops the running
+        // command; Ctrl+Shift+C always copies
+        if (e.code === "KeyC" && (e.shiftKey || term.hasSelection())) return e.type === "keydown" ? copy() : false;
+        // Ctrl+V / Ctrl+Shift+V paste (the browser's paste event reaches xterm) instead of sending a raw ^V
+        if (e.code === "KeyV") return false;
+        return true;
+      });
 
       mo = new MutationObserver(() => (term.options.theme = themeFromCss()));
       mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -131,6 +179,24 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
       term.onData((data) => send({ type: "input", data }));
       term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
 
+      // xterm remembers the character cell last under the mouse and only looks for a link when that cell changes -
+      // also after the pointer left the terminal. Coming back onto the same character of a link then shows no link
+      // and Ctrl+click does nothing. On re-entry, one move to another cell and one at the real position make it look
+      // the link up again.
+      const screenEl = hostRef.current.querySelector<HTMLElement>(".xterm-screen");
+      if (screenEl) {
+        const onEnter = (ev: MouseEvent) => {
+          const r = screenEl.getBoundingClientRect();
+          const move = (x: number, y: number) =>
+            screenEl.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: y, bubbles: true, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey }));
+          const nearBottomRight = ev.clientX > r.right - 24 && ev.clientY > r.bottom - 24;
+          move(nearBottomRight ? r.left + 1 : r.right - 2, nearBottomRight ? r.top + 1 : r.bottom - 2); // another cell
+          move(ev.clientX, ev.clientY);
+        };
+        screenEl.addEventListener("mouseenter", onEnter);
+        offEnter = () => screenEl.removeEventListener("mouseenter", onEnter);
+      }
+
       ro = new ResizeObserver(() => {
         if (!hostRef.current || hostRef.current.offsetWidth === 0) return; // hidden
         try {
@@ -145,6 +211,7 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
     return () => {
       disposed = true;
       ro?.disconnect();
+      offEnter?.();
       mo?.disconnect();
       wsRef.current?.close(); // the helper then ends the shell and everything started in it
       wsRef.current = null;
@@ -171,13 +238,18 @@ export default function TerminalView({ projectId, shellId, visible, focused, onF
   }, [focused, visible]);
 
   return (
-    <div className={`terminal-view${focused ? " focused" : ""}`} onMouseDown={onFocus} onFocusCapture={onFocus}>
+    <div ref={viewRef} className={`terminal-view${focused ? " focused" : ""}`} onMouseDown={onFocus} onFocusCapture={onFocus}>
       {error ? (
         <div className="terminal-error" role="alert">
           {error}
         </div>
       ) : null}
       <div ref={hostRef} className="terminal-host" hidden={!!error} />
+      {linkHint && (
+        <div className="terminal-link-hint" role="tooltip" style={{ left: linkHint.x, top: linkHint.y }}>
+          Follow link ({typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "cmd" : "ctrl"} + click)
+        </div>
+      )}
     </div>
   );
 }

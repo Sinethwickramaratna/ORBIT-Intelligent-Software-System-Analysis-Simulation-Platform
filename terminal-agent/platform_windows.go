@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// Windows passes an "ignore Ctrl+C" flag from a process to every process it starts. The helper is often started by
+// something that sets it (a hidden PowerShell Start-Process, Git Bash, a service), and the shells would inherit it:
+// then Ctrl+C in the terminal cannot stop a running command. Clearing it here makes every shell handle Ctrl+C again.
+func init() {
+	setConsoleCtrlHandler := syscall.NewLazyDLL("kernel32.dll").NewProc("SetConsoleCtrlHandler")
+	_, _, _ = setConsoleCtrlHandler.Call(0, 0) // (NULL, FALSE): do not ignore Ctrl+C
+}
+
 func availableShells() []Shell {
 	return detectWindowsShells(probe{
 		getenv:   os.Getenv,

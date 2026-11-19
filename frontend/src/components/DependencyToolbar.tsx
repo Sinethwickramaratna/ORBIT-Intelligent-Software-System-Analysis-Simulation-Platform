@@ -60,19 +60,19 @@ export function DependencyStatusIcon({ dep, size = 22 }: { dep: Dependencies; si
 }
 
 /**
- * Top-bar controls of the open project: the Dependency Check button, the status icon (green check = everything
+ * Controls of the open project (in the tab bar, next to Problems and the terminal): the Dependency Check button, the status icon (green check = everything
  * installed, red X = something missing) and, when something is missing, Setup Dependencies.
  */
-export default function DependencyToolbar({ dep }: { dep: Dependencies }) {
+export default function DependencyToolbar({ dep, compact = false }: { dep: Dependencies; compact?: boolean }) {
   const busy = dep.checking || dep.installing || dep.indicator === "loading";
   const showSetup = dep.indicator === "missing" || dep.installing;
   return (
-    <div className="dep-toolbar" role="group" aria-label="Dependencies">
+    <div className={`dep-toolbar${compact ? " compact" : ""}`} role="group" aria-label="Dependencies">
       <button type="button" className="dep-btn" onClick={dep.runCheck} disabled={busy} title="Check that every dependency of the project is installed">
         <ShieldIcon />
         <span>{dep.checking ? "Checking…" : "Dependency Check"}</span>
       </button>
-      <DependencyStatusIcon dep={dep} />
+      <DependencyStatusIcon dep={dep} size={compact ? 16 : 22} />
       {dep.checking && dep.checkProgress && (
         <span className="dep-running" role="status" title={dep.checkProgress.phase ?? undefined}>
           <span className="dep-running-bar" aria-hidden="true">
