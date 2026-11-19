@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { Dependencies } from "@/lib/useDependencies";
 import ArchitecturePanel from "./ArchitecturePanel";
@@ -8,6 +8,9 @@ import { languageForPath, languageName } from "@/lib/languages";
 import CodeEditor, { disposeModel, modelPath, readModelText, takeModelText } from "./CodeEditor";
 import ConfirmDialog from "./ConfirmDialog";
 import FileTree from "./FileTree";
+import BottomPanel, { ErrorIcon, WarningIcon, type PanelTab, type Problem } from "./BottomPanel";
+import { loader } from "@monaco-editor/react";
+import { installSyntaxChecker } from "@/lib/diagnostics";
 
 export interface WorkspaceProject {
   projectId: string;
@@ -56,6 +59,62 @@ const TabFileGlyph = () => (
   </svg>
 );
 
+const PANEL_OPEN_KEY = "orbit.panel.open";
+const PANEL_HEIGHT_KEY = "orbit.panel.height";
+const PANEL_MIN = 110;
+
+const TerminalGlyph = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="m7 9 3 3-3 3M12 15h5" />
+  </svg>
+);
+
+/**
+ * Problems of the open files of this project: the markers on their editor models - syntax errors from tree-sitter
+ * (lib/diagnostics.ts) and from Monaco's TypeScript / JSON / CSS services. Starts once the editor has been loaded.
+ */
+function useProblems(projectId: string, editorUsed: boolean): Problem[] {
+  const [problems, setProblems] = useState<Problem[]>([]);
+  useEffect(() => {
+    if (!editorUsed) return;
+    let alive = true;
+    let sub: { dispose(): void } | null = null;
+    loader.init().then((monaco) => {
+      if (!alive) return;
+      installSyntaxChecker(monaco);
+      const prefix = `/${projectId}/`;
+      const severity = (s: number): Problem["severity"] | null =>
+        s === monaco.MarkerSeverity.Error ? "error" : s === monaco.MarkerSeverity.Warning ? "warning" : s === monaco.MarkerSeverity.Info ? "info" : null;
+      const collect = () => {
+        const list: Problem[] = [];
+        for (const m of monaco.editor.getModelMarkers({})) {
+          const sev = severity(m.severity);
+          if (!sev || !m.resource.path.startsWith(prefix) || !monaco.editor.getModel(m.resource)) continue;
+          list.push({
+            path: m.resource.path.slice(prefix.length),
+            message: m.message,
+            severity: sev,
+            line: m.startLineNumber,
+            column: m.startColumn,
+            source: m.source || (m.owner === "orbit-syntax" ? "syntax" : m.owner),
+          });
+        }
+        const rank = { error: 0, warning: 1, info: 2 };
+        list.sort((a, b) => a.path.localeCompare(b.path) || rank[a.severity] - rank[b.severity] || a.line - b.line || a.column - b.column);
+        setProblems(list);
+      };
+      sub = monaco.editor.onDidChangeMarkers(collect);
+      collect();
+    });
+    return () => {
+      alive = false;
+      sub?.dispose();
+    };
+  }, [projectId, editorUsed]);
+  return problems;
+}
+
 /**
  * The open project: tabs + editor (or the Architecture view) in the middle, the Explorer on the right. Files open in
  * tabs when clicked in the Explorer; Ctrl+S (Cmd+S) saves the active file to disk.
@@ -80,6 +139,79 @@ export default function ProjectWorkspace({
   const filesRef = useRef(files);
   filesRef.current = files;
   const nextId = useRef(0);
+  const problems = useProblems(projectId, files.length > 0);
+  const [reveal, setReveal] = useState<{ path: string; line: number; column: number; nonce: number } | null>(null);
+
+  // ---- bottom panel (Problems + Terminal), like VS Code's: open state and height are remembered ----
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState<PanelTab>("terminal");
+  const [panelHeight, setPanelHeight] = useState(260);
+  const [newTerminalRequest, setNewTerminalRequest] = useState(0);
+  const middleRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(PANEL_OPEN_KEY) === "1") setPanelOpen(true);
+      const h = Number(localStorage.getItem(PANEL_HEIGHT_KEY));
+      if (h >= PANEL_MIN) setPanelHeight(h);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+  const showPanel = useCallback((open: boolean, tab?: PanelTab) => {
+    setPanelOpen(open);
+    if (tab) setPanelTab(tab);
+    try {
+      localStorage.setItem(PANEL_OPEN_KEY, open ? "1" : "0");
+    } catch {
+      /* not remembered */
+    }
+  }, []);
+  const terminalCount = useRef(0);
+  /** Ctrl+` / the terminal button: show or hide the panel; opening it with no terminal starts one (VS Code). */
+  const toggleTerminal = useCallback(() => {
+    if (panelOpen && panelTab === "terminal") {
+      showPanel(false);
+      return;
+    }
+    showPanel(true, "terminal");
+    if (terminalCount.current === 0) setNewTerminalRequest((n) => n + 1);
+  }, [panelOpen, panelTab, showPanel]);
+  const newTerminal = useCallback(() => {
+    showPanel(true, "terminal");
+    setNewTerminalRequest((n) => n + 1);
+  }, [showPanel]);
+
+  function startPanelResize(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = panelHeight;
+    const max = (middleRef.current?.clientHeight ?? 600) - 140;
+    const move = (ev: PointerEvent) => setPanelHeight(Math.max(PANEL_MIN, Math.min(max, startH - (ev.clientY - startY))));
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const h = Math.max(PANEL_MIN, Math.min(max, startH - (ev.clientY - startY)));
+      try {
+        localStorage.setItem(PANEL_HEIGHT_KEY, String(Math.round(h)));
+      } catch {
+        /* not remembered */
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  // Ctrl+` toggles the terminal panel, Ctrl+Shift+` opens a new terminal (VS Code keys)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || !(e.key === "`" || e.code === "Backquote" || e.key === "~")) return;
+      e.preventDefault();
+      if (e.shiftKey) newTerminal();
+      else toggleTerminal();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleTerminal, newTerminal]);
 
   /** Updates a tab by its id, so results that arrive after a rename (typing, save, load) still land on it. */
   const patch = useCallback((id: number, change: Partial<OpenFile>) => {
@@ -191,6 +323,7 @@ export default function ProjectWorkspace({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
+        if ((e.target as HTMLElement | null)?.closest?.(".xterm")) return; // Ctrl+S belongs to the shell there
         const handledByEditor = e.defaultPrevented && !!(e.target as HTMLElement | null)?.closest?.(".monaco-editor");
         e.preventDefault();
         if (handledByEditor) return; // Monaco's own Ctrl+S command already saved
@@ -239,7 +372,7 @@ export default function ProjectWorkspace({
 
   return (
     <div className="project-view">
-      <main className="project-middle" aria-label={`${project.projectName} workspace`}>
+      <main className="project-middle" aria-label={`${project.projectName} workspace`} ref={middleRef}>
         <div className="editor-tabs" role="tablist" aria-label="Open editors">
           <div
             className={`project-tab editor-tab${activePath === null ? " active" : ""}`}
@@ -297,8 +430,30 @@ export default function ProjectWorkspace({
               </div>
             );
           })}
+          <div className="editor-tabs-tools">
+            <button
+              type="button"
+              className={`problems-indicator${problems.some((p) => p.severity === "error") ? " has-errors" : ""}`}
+              title="Problems"
+              aria-label={`Problems: ${problems.filter((p) => p.severity === "error").length} errors, ${problems.filter((p) => p.severity === "warning").length} warnings`}
+              onClick={() => (panelOpen && panelTab === "problems" ? showPanel(false) : showPanel(true, "problems"))}
+            >
+              <ErrorIcon /> {problems.filter((p) => p.severity === "error").length}
+              <WarningIcon /> {problems.filter((p) => p.severity === "warning").length}
+            </button>
+            <button
+              type="button"
+              className={`tools-btn${panelOpen && panelTab === "terminal" ? " active" : ""}`}
+              aria-label="Toggle Terminal"
+              title="Toggle Terminal (Ctrl+`)"
+              onClick={toggleTerminal}
+            >
+              <TerminalGlyph />
+            </button>
+          </div>
         </div>
 
+        <div className="middle-content">
         {active ? (
           <section className="editor-pane" aria-label={`Editor: ${active.path}`}>
             <div className="editor-crumbs" title={active.path}>
@@ -323,6 +478,7 @@ export default function ProjectWorkspace({
                 onChange={(v) => patch(active.id, { value: v })}
                 onCursor={(line, column) => setCursor({ line, column })}
                 onSave={() => save(active.path)}
+                reveal={reveal && reveal.path === active.path ? reveal : null}
                 autoFocus
               />
             )}
@@ -335,6 +491,16 @@ export default function ProjectWorkspace({
               <span className="editor-status-right">
                 {!active.loading && !active.error && (
                   <>
+                    {(() => {
+                      const mine = problems.filter((p) => p.path === active.path);
+                      const errs = mine.filter((p) => p.severity === "error").length;
+                      const warns = mine.filter((p) => p.severity === "warning").length;
+                      return errs + warns > 0 ? (
+                        <button type="button" className={`status-problems${errs ? " has-errors" : ""}`} title="Show Problems" onClick={() => showPanel(true, "problems")}>
+                          <ErrorIcon /> {errs} <WarningIcon /> {warns}
+                        </button>
+                      ) : null;
+                    })()}
                     <span>Ln {cursor.line}, Col {cursor.column}</span>
                     <span className="editor-status-lang">{languageName(languageForPath(active.path))}</span>
                     <span>{active.lineEnding}</span>
@@ -347,6 +513,25 @@ export default function ProjectWorkspace({
         ) : (
           <ArchitecturePanel dep={dependencies} />
         )}
+        </div>
+
+        {panelOpen && <div className="panel-split" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" onPointerDown={startPanelResize} />}
+        <div className="panel-wrap" style={{ height: panelHeight }} hidden={!panelOpen}>
+          <BottomPanel
+            projectId={projectId}
+            tab={panelTab}
+            onTab={(t) => showPanel(true, t)}
+            onClose={() => showPanel(false)}
+            problems={problems}
+            newTerminalRequest={newTerminalRequest}
+            onTerminalCount={(n) => (terminalCount.current = n)}
+            visible={panelOpen}
+            onOpenProblem={(p) => {
+              openFile(p.path);
+              setReveal({ path: p.path, line: p.line, column: p.column, nonce: Date.now() });
+            }}
+          />
+        </div>
       </main>
 
       <FileTree

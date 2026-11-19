@@ -11,3 +11,4 @@ Dockerfile
 README.md
 tsconfig.tsbuildinfo
 public/monaco
+public/tree-sitter

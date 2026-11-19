@@ -92,6 +92,8 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
   exit 0
 fi
 echo $$ > "$PIDFILE"
+# also (re)start the terminal helper of the Terminal panel when it is built but not running (e.g. after sign-in)
+sh "$ROOT/scripts/orbit-terminal.sh" ensure >/dev/null 2>&1
 trap 'rm -f "$PIDFILE" "$SIG/watcher"; exit 0' INT TERM EXIT
 
 # a leftover marker from a helper that was killed in the middle of an apply

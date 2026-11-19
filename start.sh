@@ -22,7 +22,21 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-docker compose up -d --build || exit 1
+if ! docker compose up -d --build; then
+  # Newer Docker versions can refuse to let Compose build these images ("additional privileges requested").
+  # Plain "docker build" works everywhere, so build them one by one and start without rebuilding.
+  echo "Docker Compose could not build the images - building them one by one instead..."
+  env_value() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .env | tail -n 1; }
+  API_URL="$(env_value NEXT_PUBLIC_API_URL)"; API_URL="${API_URL:-http://localhost:8080}"
+  TERM_URL="$(env_value NEXT_PUBLIC_TERMINAL_URL)"; TERM_URL="${TERM_URL:-http://localhost:8091}"
+  docker build -t orbit-postgres:16-slim infrastructure/postgresql || exit 1
+  docker build -t orbit-backend backend || exit 1
+  docker build -t orbit-frontend --build-arg NEXT_PUBLIC_API_URL="$API_URL" --build-arg NEXT_PUBLIC_TERMINAL_URL="$TERM_URL" frontend || exit 1
+  docker compose up -d --no-build || exit 1
+fi
+
+# Terminal helper: runs the terminals of ORBIT's bottom panel on this computer (built inside Docker for it).
+sh scripts/orbit-terminal.sh start
 
 # Small helper that applies folder changes made in ORBIT's Settings (re-creates the containers for you).
 # Stop it with: ./scripts/orbit-watch.sh stop

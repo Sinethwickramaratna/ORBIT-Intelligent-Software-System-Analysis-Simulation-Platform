@@ -138,6 +138,8 @@ services:
       args:
         # Address the BROWSER uses to reach the backend
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        # Address the BROWSER uses to reach the terminal helper on this computer (scripts/orbit-terminal.*)
+        NEXT_PUBLIC_TERMINAL_URL: ${NEXT_PUBLIC_TERMINAL_URL:-http://localhost:8091}
     container_name: orbit-frontend
     restart: unless-stopped
     depends_on:

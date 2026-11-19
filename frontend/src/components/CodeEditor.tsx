@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { loader, type Monaco, type OnMount } from "@monaco-editor/react";
 import { languageForPath } from "@/lib/languages";
 import { applyEditorTheme, configureLanguageServices, editorThemeFor, prepareLanguage } from "@/lib/syntax";
+import { installSyntaxChecker } from "@/lib/diagnostics";
 
 /** Monaco is served by ORBIT itself (copied to public/ by scripts/copy-monaco.mjs): no CDN, works offline. */
 export const MONACO_PATH = "/monaco/vs";
@@ -71,13 +72,15 @@ interface Props {
   onSave?: () => void;
   label: string;
   autoFocus?: boolean;
+  /** Put the cursor here and scroll it into view (a click in the Problems list); `nonce` makes repeats count. */
+  reveal?: { line: number; column: number; nonce: number } | null;
 }
 
 /**
  * The code editor of the IDE view: Monaco (the editor of VS Code) coloured by the TextMate grammars and themes of
  * VS Code's language extensions. Brackets, indentation, multi-cursor, find/replace, minimap and undo work as in VS Code.
  */
-export default function CodeEditor({ filePath, path, value, revision, onChange, onCursor, onSave, label, autoFocus }: Props) {
+export default function CodeEditor({ filePath, path, value, revision, onChange, onCursor, onSave, label, autoFocus, reveal }: Props) {
   const appTheme = useAppTheme();
   const language = useMemo(() => languageForPath(filePath), [filePath]);
   const [ready, setReady] = useState<string | null>(null); // the language whose grammar is installed
@@ -90,6 +93,17 @@ export default function CodeEditor({ filePath, path, value, revision, onChange, 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const valueRef = useRef(value);
   valueRef.current = value;
+  const [mounted, setMounted] = useState(0);
+
+  // jump to a problem: after the model of `path` is in the editor (child effects run first)
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !reveal) return;
+    const position = { lineNumber: reveal.line, column: reveal.column };
+    editor.setPosition(position);
+    editor.revealPositionInCenter(position);
+    editor.focus();
+  }, [reveal?.nonce, mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the file was reloaded from disk: replace the text as one undoable edit (typing never comes through here)
   useEffect(() => {
@@ -108,6 +122,7 @@ export default function CodeEditor({ filePath, path, value, revision, onChange, 
       .then(async (monaco) => {
         monacoRef.current = monaco;
         configureLanguageServices(monaco);
+        installSyntaxChecker(monaco);
         applyEditorTheme(monaco, document.documentElement.getAttribute("data-theme"));
         await prepareLanguage(monaco, language);
         if (alive) setReady(language);
@@ -135,6 +150,7 @@ export default function CodeEditor({ filePath, path, value, revision, onChange, 
     // the UI font loads asynchronously: measure again once it is there, or the cursor drifts
     document.fonts?.ready.then(() => monaco.editor.remeasureFonts()).catch(() => undefined);
     if (autoFocus) editor.focus();
+    setMounted((n) => n + 1);
   };
 
   if (failed) {
@@ -150,6 +166,7 @@ export default function CodeEditor({ filePath, path, value, revision, onChange, 
     <div className="code-editor" aria-label={label}>
       <Editor
         path={path}
+        keepCurrentModel /* models live as long as their tab (ProjectWorkspace frees them), so Problems stay listed */
         language={ready === language ? language : "plaintext"}
         defaultValue={value}
         theme={editorThemeFor(appTheme)}

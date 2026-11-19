@@ -15,7 +15,8 @@ Orbit/
 ├── .env.example                # SAMPLE with empty secrets  →  copy to .env
 ├── .env                        # your own settings, written by the setup screen (git-ignored)
 ├── start.cmd / start.sh        # start everything (+ the folder helper, see below)
-├── scripts/                    # orbit-watch.* (folder helper), orbit-apply.cmd, build-images.* (compressed images)
+├── scripts/                    # orbit-watch.* (folder helper), orbit-terminal.* (terminal helper), orbit-apply.cmd, build-images.*
+├── terminal-agent/             # ORBIT terminal helper (Go): runs the Terminal panel's shells on your computer, built inside Docker
 ├── infrastructure/postgresql/  # Postgres image: starts once DB credentials exist, SQL backup + restore
 ├── backend/                    # Spring Boot 4 (Java 17+), Maven wrapper, Dockerfile
 │   └── src/main/java/com/orbit/backend/
@@ -105,12 +106,27 @@ The backend reads/writes `../.env` (the repo-root file) by default. Override wit
    file, next to it; on empty space below the files (or on the project name), into the project root. Right-clicking a
    file or folder also offers **Rename** (`F2`) and **Delete** (`Delete` key; it asks first and removes it from disk,
    folders with everything in them). Open tabs follow renamed files and folders.
-9. **Scan again:** after the folder changed, press **Scan** in the Explorer; a progress bar shows how far it is.
-10. **Delete a project:** the three dots next to a project -> **Delete**, then type its name. This removes it from ORBIT
+   **Syntax errors** are underlined in red as in VS Code: hover the red line for the message; they are also marked in
+   the scrollbar, counted in the editor's status bar and listed in the **Problems** tab of the bottom panel (the
+   counter at the right end of the tab bar opens it; a click on a problem jumps to it). TypeScript / JavaScript, JSON
+   and CSS / SCSS / Less are checked by Monaco's own language services; Python, Java, C#, C/C++, Go, Rust, Ruby, PHP,
+   Bash and PowerShell by **tree-sitter** - the parser and grammars VS Code itself ships (`@vscode/tree-sitter-wasm`,
+   copied to `frontend/public/tree-sitter`, works offline). These are syntax errors only (a missing `;` or `)`, an
+   unexpected token, ...), not type errors.
+9. **Terminal:** inside an open project press **`` Ctrl+` ``** (or the terminal icon at the right end of the tab bar) to open
+   the **Terminal** in the bottom panel. It starts in the project folder. The **⌄** next to **+** lists the shells your
+   computer has - on Windows Windows PowerShell (the default), PowerShell 7, Command Prompt, Git Bash, WSL, MSYS2 /
+   Cygwin; on macOS / Linux the shells of `/etc/shells` (zsh, bash, fish, ...) with your login shell as the default.
+   **+** (or **`` Ctrl+Shift+` ``**) opens another terminal, **Split Terminal** puts a second terminal next to the active one
+   in the same tab (up to 4 side by side), and the list on the right switches between them; **Kill Terminal** (trash)
+   closes one and ends its shell and everything still running in it. Closing the project ends all its terminals.
+   Terminals run on **your computer**, not in Docker, through the small **ORBIT terminal helper** (see *Terminal helper*).
+10. **Scan again:** after the folder changed, press **Scan** in the Explorer; a progress bar shows how far it is.
+11. **Delete a project:** the three dots next to a project -> **Delete**, then type its name. This removes it from ORBIT
    only - the files on disk are kept.
-11. **Add or change drives later:** gear icon in the Projects panel -> **Settings** -> edit the folders -> **Save**, then
+12. **Add or change drives later:** gear icon in the Projects panel -> **Settings** -> edit the folders -> **Save**, then
    ORBIT applies it by itself (the small ORBIT helper window that `start.cmd` opens does this).
-12. **Stop / reset:** `docker compose down` stops everything and keeps your data; see *Database persistence* to start from zero.
+13. **Stop / reset:** `docker compose down` stops everything and keeps your data; see *Database persistence* to start from zero.
 
 ## Project analysis
 
@@ -325,6 +341,8 @@ Protected (`Authorization: Bearer <access token>`): `POST /api/auth/logout`, `GE
 `GET|PUT|DELETE /api/users/{id}` (update/delete: own account only).
 Projects (own projects only): `GET|POST /api/projects`, `GET /api/projects/config`, `GET /api/projects/inspect?location=`,
 `GET /api/projects/{id}`, `GET /api/projects/{id}/tree?path=` (one folder level, lazily),
+Terminal: `POST /api/projects/{id}/terminal/ticket` → `{ticket, expiresAt, cwd}` (one-time ticket for the terminal helper,
+see *Terminal helper*; `409 PROJECT_FOLDER_UNAVAILABLE` when the folder is gone).
 Files (paths relative to the project root; nothing outside it, nothing in `.git`): `GET /api/projects/{id}/file?path=`
 (open a UTF-8 text file: `{path, name, content, size, lastModified, bom, lineEnding}`; `415 FILE_NOT_TEXT` for binary /
 non-UTF-8, `413 FILE_TOO_LARGE` above 5 MB), `PUT /api/projects/{id}/file` `{path, content, bom, expectedLastModified?}`
@@ -370,7 +388,11 @@ Errors are JSON: `{timestamp,status,code,message,path,fieldErrors?}` — e.g. `U
 * the dependency check of every ecosystem (`DependencyCheckerTest`) and the version-range rules of npm/pub, PEP 440 and
   NuGet (`SemverTest`, `Pep440Test`, `NuGetVersionTest`);
 * integration tests for the whole authentication flow, the project API and the dependency API
-  (`DependencyApiIntegrationTest`: automatic check on create, check button, setup job).
+  (`DependencyApiIntegrationTest`: automatic check on create, check button, setup job);
+* terminal tickets (`TerminalTicketServiceTest`, plus the ticket endpoint in `ProjectApiIntegrationTest`).
+
+Terminal helper: `docker build --target build terminal-agent` runs its Go tests (ticket checks with the same test
+vector as the Java test, single use, origin check, shell detection for Windows and macOS / Linux).
 
 Real downloads from npm, PyPI, Maven Central, nuget.org and pub.dev need internet and run only on request:
 `./mvnw test -Dtest=DependencySetupNetworkTest -Dorbit.networkTests=true`.
@@ -379,6 +401,37 @@ Frontend: `cd frontend && npm run typecheck && npm run build`.
 
 CI (`.github/workflows/main.yml`) runs on every push to `main`: preflight checks (required files and tools, valid
 compose file, Maven dependencies, npm lockfile in sync), the backend tests, and the frontend type-check and build.
+
+## Terminal helper
+
+The backend usually runs in Docker (a small Linux container without your tools), so the terminals of the bottom panel
+are run by a tiny program **on your computer** instead: the ORBIT terminal helper (`terminal-agent/`, written in Go).
+It works on Windows, macOS and Linux (Intel and ARM) and needs nothing extra - `start.cmd` / `start.sh` compile it
+**inside Docker** for your computer (`.orbit-bin/orbit-terminal(.exe)`) and start it in the background. When the
+folder helper is set to start at sign-in, it also starts the terminal helper.
+
+```bash
+scripts\orbit-terminal.cmd start    # Windows   (./scripts/orbit-terminal.sh start on macOS / Linux)
+scripts\orbit-terminal.cmd status   # is it running?   stop = stop it and every terminal it runs
+scripts\orbit-terminal.cmd run      # run it in this window with its log on the screen
+```
+
+How a terminal opens: the web app asks the backend for a **one-time ticket**
+(`POST /api/projects/{id}/terminal/ticket` - only for your own project, while its folder exists), then connects to the
+helper at `ws://localhost:8091/terminal?ticket=…&shell=…`; the helper starts the chosen shell in the project folder
+through a pseudo-terminal (ConPTY on Windows) and streams it to the browser (xterm.js). `GET /shells` lists the shells
+it found. Safety:
+
+* the helper listens on **127.0.0.1:8091 only** - nothing else on the network can reach it;
+* a ticket is signed with a key derived from your `JWT_SECRET` (the helper reads it from `.env`), lives 60 seconds,
+  works **once** and can never be used as a login token; it names the project folder, so a terminal can only start
+  in a project of the signed-in user;
+* only the ORBIT web app may connect (`Origin` must be `http://localhost:3000`; other web pages you visit are refused);
+* closing a terminal, the project or the browser tab ends the shell **and everything started in it**.
+
+Settings (in `.env` or the environment): `ORBIT_TERMINAL_ORIGINS` (allowed web app origins, comma-separated) and, for
+the web app build, `NEXT_PUBLIC_TERMINAL_URL` (default `http://localhost:8091`). When the helper is not running, the
+Terminal panel says so and shows the command that starts it.
 
 ## Security notes
 

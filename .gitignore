@@ -10,6 +10,7 @@ node_modules/
 frontend/out/
 # copied from node_modules/monaco-editor by `npm run dev|build` (scripts/copy-monaco.mjs)
 frontend/public/monaco/
+frontend/public/tree-sitter/
 frontend/coverage/
 frontend/next-env.d.ts
 *.tsbuildinfo
@@ -90,3 +91,5 @@ claude outputs/
 
 /frontend/AGENTS.md
 /frontend/CLAUDE.md
+# ORBIT terminal helper (built by scripts/orbit-terminal.* into this folder)
+.orbit-bin/

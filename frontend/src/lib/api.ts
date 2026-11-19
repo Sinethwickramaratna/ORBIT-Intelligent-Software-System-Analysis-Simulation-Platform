@@ -440,6 +440,9 @@ export const api = {
     authed<FolderBrowse>("/api/projects/browse/folder", { method: "POST", body: JSON.stringify({ parent, name }) }),
   projectTree: (projectId: string, path = "") =>
     authed<ProjectTree>(`/api/projects/${projectId}/tree?path=${encodeURIComponent(path)}`),
+  /** One-time ticket for the terminal helper: a terminal in this project's folder (see lib/terminal.ts). */
+  terminalTicket: (projectId: string) =>
+    authed<{ ticket: string; expiresAt: number; cwd: string }>(`/api/projects/${projectId}/terminal/ticket`, { method: "POST" }),
   /** Opens a UTF-8 text file of the project for the editor. */
   readFile: (projectId: string, path: string) =>
     authed<FileContent>(`/api/projects/${projectId}/file?path=${encodeURIComponent(path)}`),

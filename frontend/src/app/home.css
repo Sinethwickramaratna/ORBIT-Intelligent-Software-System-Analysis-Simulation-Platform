@@ -798,3 +798,79 @@
 }
 .editor-status-right { display: flex; gap: 16px; }
 .editor-status-error { color: var(--danger); overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- bottom panel: Problems + Terminal (like VS Code) ---------- */
+.middle-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.panel-split { flex: none; height: 5px; margin-top: -2px; cursor: row-resize; border-top: 1px solid var(--border); position: relative; z-index: 2; }
+.panel-split:hover, .panel-split:active { border-top: 2px solid var(--accent); }
+.panel-wrap { flex: none; min-height: 0; display: flex; flex-direction: column; }
+.panel-wrap[hidden], .terminal-area[hidden], .terminal-group[hidden], .terminal-host[hidden] { display: none !important; }
+.bottom-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.panel-head { flex: none; height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 14px; }
+.panel-tabs { display: flex; gap: 18px; height: 100%; }
+.panel-tab {
+  display: flex; align-items: center; gap: 6px; padding: 0 2px; font: inherit; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); background: transparent; border: 0; border-bottom: 1px solid transparent; cursor: pointer;
+}
+.panel-tab:hover { color: var(--text); }
+.panel-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.panel-badge { min-width: 16px; padding: 0 5px; font-size: 10px; line-height: 16px; text-align: center; letter-spacing: 0; color: var(--text); background: var(--surface-2); border-radius: 8px; }
+.panel-actions { display: flex; align-items: center; gap: 2px; }
+.panel-split-btn { display: inline-flex; }
+.panel-action { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.panel-action.narrow { width: 16px; }
+.panel-action:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+.panel-action:disabled { opacity: .4; cursor: default; }
+.panel-body { flex: 1; min-height: 0; display: flex; }
+.panel-empty { padding: 14px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.panel-empty strong { color: var(--text); }
+.panel-empty code { color: var(--text); }
+.terminal-empty-shells { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.problems { flex: 1; min-width: 0; overflow: auto; padding: 2px 0 8px; font-size: 13px; scrollbar-width: thin; }
+.problem-file { height: 22px; display: flex; align-items: center; gap: 8px; padding: 0 14px; }
+.problem-file-name { font-weight: 600; color: var(--text); }
+.problem-file-dir { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problem-row {
+  width: 100%; height: 22px; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 30px; font: inherit; font-size: 13px; text-align: left;
+  color: var(--text); background: transparent; border: 0; cursor: pointer;
+}
+.problem-row:hover, .problem-row:focus-visible { background: var(--surface-2); outline: none; }
+.problem-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problem-src, .problem-pos { flex: none; font-size: 12px; color: var(--muted); }
+.problems-summary { padding: 6px 14px 0; font-size: 12px; color: var(--muted); }
+.sev-icon { flex: none; }
+.sev-icon.error { color: #f14c4c; }
+.sev-icon.warning { color: #cca700; }
+.sev-icon.info { color: #3794ff; }
+
+.terminal-area { flex: 1; min-width: 0; display: flex; }
+.terminal-groups { flex: 1; min-width: 0; display: flex; }
+.terminal-group { flex: 1; min-width: 0; display: flex; }
+.terminal-divider { flex: none; width: 1px; background: var(--border); }
+.terminal-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 4px 0 0 12px; }
+.terminal-host { flex: 1; min-width: 0; min-height: 0; }
+.terminal-host .xterm { height: 100%; }
+.terminal-host .xterm-viewport { scrollbar-width: thin; }
+.terminal-error { padding: 10px 12px 10px 0; font-size: 13px; line-height: 1.5; color: var(--danger); }
+.terminal-list { flex: none; width: 210px; margin: 0; padding: 4px 0; list-style: none; overflow: auto; border-left: 1px solid var(--border); }
+.terminal-item { height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.terminal-item:hover { background: var(--surface-2); color: var(--text); }
+.terminal-item.active { color: var(--text); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.split-line { width: 10px; flex: none; font-size: 12px; color: var(--muted); }
+.terminal-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-item-exited { font-size: 11px; color: var(--muted); }
+.terminal-item-actions { display: none; gap: 2px; }
+.terminal-item:hover .terminal-item-actions, .terminal-item.active .terminal-item-actions { display: flex; }
+.terminal-item-actions button { width: 20px; height: 20px; display: grid; place-items: center; padding: 0; color: inherit; background: transparent; border: 0; border-radius: 3px; cursor: pointer; }
+.terminal-item-actions button:hover { background: color-mix(in srgb, var(--text) 14%, transparent); }
+.terminal-item-actions svg { width: 14px; height: 14px; }
+
+.editor-tabs-tools { flex: none; position: sticky; right: 0; margin-left: auto; display: flex; align-items: center; gap: 2px; padding: 0 8px; background: var(--surface); }
+.problems-indicator, .tools-btn, .status-problems {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; font: inherit; font-size: 12px; color: var(--muted);
+  background: transparent; border: 0; border-radius: 4px; cursor: pointer;
+}
+.problems-indicator:hover, .tools-btn:hover, .status-problems:hover { color: var(--text); background: var(--surface-2); }
+.tools-btn.active { color: var(--accent); }
+.status-problems { padding: 0 4px; }

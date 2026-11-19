@@ -4,7 +4,10 @@ WORKDIR /app
 # NEXT_PUBLIC_* values are baked into the browser bundle at build time.
 # This is the address the *browser* uses to reach the backend.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+# The terminal helper that runs on the user's computer (scripts/orbit-terminal.*)
+ARG NEXT_PUBLIC_TERMINAL_URL=http://localhost:8091
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_TERMINAL_URL=$NEXT_PUBLIC_TERMINAL_URL \
     NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci

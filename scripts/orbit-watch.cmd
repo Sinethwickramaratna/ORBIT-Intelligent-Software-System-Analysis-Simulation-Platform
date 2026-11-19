@@ -24,6 +24,9 @@ rem soon as it finds a different id there. So a helper that got stuck (for examp
 rem after Ctrl+C) can never block a new one.
 set "ME=%RANDOM%%RANDOM%%RANDOM%"
 >".orbit-signal\watcher.id" echo %ME%
+rem also (re)start the terminal helper of the Terminal panel when it is built but not running (e.g. after sign-in)
+call "%~dp0orbit-terminal.cmd" ensure >nul 2>&1
+cd /d "%~dp0.."
 call :loop
 exit /b 0
 

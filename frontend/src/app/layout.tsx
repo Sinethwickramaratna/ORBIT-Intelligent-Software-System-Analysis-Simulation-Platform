@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import "@fontsource/antonio/400.css";
 import "@fontsource/source-code-pro/400.css";
 import "@fontsource/source-code-pro/600.css";
+import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 import "./home.css";
 import ScrollbarAutoHide from "@/components/ScrollbarAutoHide";
